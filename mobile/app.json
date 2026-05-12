@@ -1,0 +1,39 @@
+{
+  "expo": {
+    "name": "Smart Mobility",
+    "slug": "smart-mobility",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "scheme": "smartmobility",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0D0D1A"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "it.uniba.serlab.smartmobility"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0D0D1A"
+      },
+      "package": "it.uniba.serlab.smartmobility",
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Consenti a Smart Mobility di accedere alla fotocamera per scansionare il QR code del mezzo."
+        }
+      ]
+    ]
+  }
+}

@@ -1,0 +1,128 @@
+import React, { useState } from 'react';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Switch } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
+import { Colors } from '@/constants/theme';
+
+export default function SettingsScreen() {
+  const [notifRide, setNotifRide]       = useState(true);
+  const [notifPromo, setNotifPromo]     = useState(true);
+  const [notifSystem, setNotifSystem]   = useState(false);
+  const [locationBg, setLocationBg]     = useState(true);
+  const [biometric, setBiometric]       = useState(false);
+
+  const section = (title: string, items: React.ReactNode) => (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      <View style={styles.sectionCard}>{items}</View>
+    </View>
+  );
+
+  const row = (
+    icon: string, label: string, sub: string | null,
+    right: React.ReactNode, onPress?: () => void, last?: boolean
+  ) => (
+    <TouchableOpacity
+      style={[styles.row, !last && styles.rowBorder]}
+      onPress={onPress}
+      activeOpacity={onPress ? 0.7 : 1}
+    >
+      <View style={styles.rowIcon}>
+        <Ionicons name={icon as any} size={20} color={Colors.accent} />
+      </View>
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text style={styles.rowLabel}>{label}</Text>
+        {sub && <Text style={styles.rowSub}>{sub}</Text>}
+      </View>
+      {right}
+    </TouchableOpacity>
+  );
+
+  const toggle = (value: boolean, setter: (v: boolean) => void) => (
+    <Switch
+      value={value}
+      onValueChange={setter}
+      trackColor={{ false: Colors.border, true: Colors.primary }}
+      thumbColor={Colors.text}
+    />
+  );
+
+  const chevron = <Ionicons name="chevron-forward" size={18} color={Colors.muted} />;
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <Ionicons name="arrow-back" size={24} color={Colors.text} />
+        </TouchableOpacity>
+        <Text style={styles.title}>Impostazioni</Text>
+      </View>
+
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
+
+        {section('Notifiche', <>
+          {row('bicycle-outline',      'Corse e veicoli',  'Aggiornamenti sulle tue corse', toggle(notifRide, setNotifRide))}
+          {row('gift-outline',         'Promozioni',       'Offerte e bonus esclusivi',     toggle(notifPromo, setNotifPromo))}
+          {row('information-circle-outline', 'Comunicazioni di sistema', 'Aggiornamenti e manutenzioni', toggle(notifSystem, setNotifSystem), undefined, true)}
+        </>)}
+
+        {section('Privacy e sicurezza', <>
+          {row('location-outline',  'Posizione in background', 'Necessaria per il tracciamento corse', toggle(locationBg, setLocationBg))}
+          {row('finger-print-outline', 'Accesso biometrico', 'Usa Face ID o impronta digitale', toggle(biometric, setBiometric))}
+          {row('lock-closed-outline', 'Cambia password', null, chevron, () => {})}
+          {row('shield-outline',    'Autenticazione a due fattori', 'Aggiungi un livello di sicurezza', chevron, () => {}, true)}
+        </>)}
+
+        {section('Preferenze', <>
+          {row('language-outline',  'Lingua',    'Italiano', chevron, () => {})}
+          {row('phone-portrait-outline', 'Tema', 'Scuro',    chevron, () => {})}
+          {row('map-outline',       'Unità di misura', 'Kilometri', chevron, () => {}, true)}
+        </>)}
+
+        {section('Informazioni', <>
+          {row('document-text-outline', 'Termini di servizio', null, chevron, () => {})}
+          {row('shield-checkmark-outline', 'Informativa privacy', null, chevron, () => {})}
+          {row('information-circle-outline', 'Versione app', '1.0.0 (build 42)', null, undefined, true)}
+        </>)}
+
+        {/* Danger zone */}
+        <View style={[styles.section, { marginBottom: 0 }]}>
+          <Text style={[styles.sectionTitle, { color: Colors.danger }]}>Zona pericolosa</Text>
+          <View style={styles.sectionCard}>
+            <TouchableOpacity style={styles.row} onPress={() => router.replace('/(auth)/login')}>
+              <View style={[styles.rowIcon, { backgroundColor: 'rgba(239,68,68,0.1)' }]}>
+                <Ionicons name="log-out-outline" size={20} color={Colors.danger} />
+              </View>
+              <Text style={[styles.rowLabel, { color: Colors.danger }]}>Esci dall'account</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.row, styles.rowBorder]} onPress={() => {}}>
+              <View style={[styles.rowIcon, { backgroundColor: 'rgba(239,68,68,0.1)' }]}>
+                <Ionicons name="trash-outline" size={20} color={Colors.danger} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.rowLabel, { color: Colors.danger }]}>Elimina account</Text>
+                <Text style={styles.rowSub}>Questa azione è irreversibile</Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+      </ScrollView>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container:    { flex: 1, backgroundColor: Colors.bg },
+  header:       { flexDirection: 'row', alignItems: 'center', gap: 14, paddingTop: 56, paddingHorizontal: 20, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: Colors.border, backgroundColor: Colors.card },
+  backBtn:      { padding: 2 },
+  title:        { color: Colors.text, fontSize: 20, fontWeight: '800' },
+  section:      { marginTop: 24, paddingHorizontal: 16, gap: 10, marginBottom: 0 },
+  sectionTitle: { color: Colors.muted, fontSize: 12, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', paddingLeft: 4 },
+  sectionCard:  { backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border, borderRadius: 16, overflow: 'hidden' },
+  row:          { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14 },
+  rowBorder:    { borderBottomWidth: 1, borderBottomColor: Colors.border },
+  rowIcon:      { width: 36, height: 36, borderRadius: 10, backgroundColor: Colors.surface, alignItems: 'center', justifyContent: 'center' },
+  rowLabel:     { color: Colors.text, fontSize: 15, fontWeight: '500' },
+  rowSub:       { color: Colors.muted, fontSize: 12 },
+});

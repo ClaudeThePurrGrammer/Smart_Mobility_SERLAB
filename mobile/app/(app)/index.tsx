@@ -15,6 +15,7 @@ import { haversineMeters, formatDistance } from '@/lib/geo';
 import { vehiclesApi, geoApi } from '@/lib/api/endpoints';
 import type { ApiGeocodeResult } from '@/lib/api/types';
 import { useAuth } from '@/lib/auth/AuthContext';
+import { useRideSession } from '@/lib/ride/RideSessionContext';
 import VehicleDetailSheet from '@/components/map/VehicleDetailSheet';
 import ManualLocationModal from '@/components/map/ManualLocationModal';
 
@@ -53,16 +54,6 @@ const DEFAULT_REGION = { latitude: 41.1177, longitude: 16.8718, latitudeDelta: 0
 // Raggio (m) entro cui consideriamo i mezzi "nelle vicinanze" (SA-02b).
 const NEARBY_RADIUS_M = 1000;
 
-type Destination = { label: string; km: string; min: number };
-const DESTINATIONS: Destination[] = [
-  { label: 'Porta Romana, Milano',         km: '2,4', min: 8  },
-  { label: 'Università degli Studi, Bari', km: '3,1', min: 11 },
-  { label: 'Stazione Centrale, Milano',    km: '1,8', min: 6  },
-  { label: 'Piazza del Ferrarese, Bari',   km: '1,2', min: 4  },
-  { label: 'Centro Commerciale, Bari',     km: '4,5', min: 15 },
-  { label: 'Politecnico di Bari',          km: '2,9', min: 10 },
-];
-
 function usePressAnim() {
   const scale = useRef(new Animated.Value(1)).current;
   const onPressIn  = () => Animated.spring(scale, { toValue: 0.95, ...SPRING_CFG }).start();
@@ -83,6 +74,18 @@ export default function HomeScreen() {
   // ── Mezzi caricati dal Controller (DB) ─────────────────────────────────────
   const { token } = useAuth();
   const [vehicles, setVehicles] = useState<MapVehicle[]>([]);
+
+  // ── Sessione corsa esplicita: banner solo se l'utente ha avviato una corsa ──
+  const { session } = useRideSession();
+  const [, forceUpdate] = useState(0);
+  useEffect(() => {
+    if (!session) return;
+    const t = setInterval(() => forceUpdate(n => n + 1), 60000);
+    return () => clearInterval(t);
+  }, [session]);
+  const elapsedMin = session
+    ? Math.floor((Date.now() - session.startedAtMs) / 60000)
+    : 0;
 
   // Polling ogni 8s: la flotta si muove in tempo reale sulla mappa (drift GPS lato backend).
   useEffect(() => {
@@ -134,11 +137,11 @@ export default function HomeScreen() {
     );
   }, [coords, vehicles]);
 
-  // Prenotazione → schermata dedicata di conferma (l'avvio corsa avviene lì).
+  // Tap su mezzo → schermata di scelta avvio (prenota / scansiona QR / codice).
   const handleReserve = useCallback((v: MapVehicle) => {
     setSelectedVehicle(null);
     router.push({
-      pathname: '/(app)/reserve',
+      pathname: '/(app)/vehicle-action',
       params: {
         vehicleId: String(v.id),
         ...(coords ? { fromLat: String(coords.latitude), fromLng: String(coords.longitude) } : {}),
@@ -224,11 +227,6 @@ export default function HomeScreen() {
       setSearchQuery('');
     });
   }, []);
-
-  const navigateToSearch = useCallback((query: string) => {
-    closeSearchModal();
-    setTimeout(() => router.push({ pathname: '/(app)/search', params: { q: query } }), 250);
-  }, [closeSearchModal]);
 
   // Ricerca indirizzi reale via geocoding (OpenStreetMap), con debounce.
   const [geoResults, setGeoResults] = useState<ApiGeocodeResult[]>([]);
@@ -377,9 +375,42 @@ export default function HomeScreen() {
         </View>
       )}
 
+      {/* Banner corsa in corso — solo se l'utente ha avviato una corsa in questa sessione */}
+      {session && (
+        <TouchableOpacity
+          style={styles.activeBanner}
+          onPress={() =>
+            router.push({
+              pathname: '/(app)/active-ride',
+              params: {
+                rideId:    String(session.rideId),
+                vehicleId: String(session.vehicleId),
+              },
+            })
+          }
+          activeOpacity={0.85}
+        >
+          <LinearGradient
+            colors={['rgba(124,58,237,0.9)', 'rgba(79,142,247,0.9)']}
+            start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+            style={styles.activeBannerInner}
+          >
+            <View style={styles.activeBannerDot} />
+            <Text style={styles.activeBannerText}>Corsa in corso</Text>
+            <Text style={styles.activeBannerSub}>{elapsedMin} min</Text>
+            <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.7)" />
+          </LinearGradient>
+        </TouchableOpacity>
+      )}
+
       {/* Bottom sheet — nascosto quando è aperto il pannello di dettaglio mezzo */}
       <Animated.View
-        style={[styles.sheet, { height: sheetHeight }, selectedVehicle ? styles.hidden : null]}
+        style={[
+          styles.sheet,
+          { height: sheetHeight },
+          session ? { bottom: 72 } : null,
+          selectedVehicle ? styles.hidden : null,
+        ]}
         pointerEvents={selectedVehicle ? 'none' : 'auto'}
       >
         <BlurView intensity={55} tint="dark" style={StyleSheet.absoluteFillObject} />
@@ -390,7 +421,7 @@ export default function HomeScreen() {
         <View style={styles.sheetContent}>
           {/* Search pill — opens isolated modal */}
           <TouchableOpacity style={styles.searchPill} onPress={openSearchModal} activeOpacity={0.8}>
-            <Ionicons name="search-outline" size={20} color={Colors.accent} />
+            <Ionicons name="search-outline" size={16} color={Colors.muted} />
             <Text style={styles.searchPillText}>Dove si va?</Text>
             <Ionicons name="chevron-forward" size={16} color="rgba(167,139,250,0.4)" />
           </TouchableOpacity>
@@ -448,7 +479,16 @@ export default function HomeScreen() {
                 returnKeyType="search"
                 autoFocus
                 autoCorrect={false}
-                onSubmitEditing={() => { if (searchQuery.trim()) navigateToSearch(searchQuery.trim()); }}
+                onSubmitEditing={() => {
+                  const r = geoResults[0];
+                  if (!r) return;
+                  const short = r.label.split(',').slice(0, 2).join(',');
+                  closeSearchModal();
+                  setTimeout(() => router.push({
+                    pathname: '/(app)/search',
+                    params: { q: short, destLat: String(r.lat), destLng: String(r.lng) }
+                  }), 250);
+                }}
               />
               <TouchableOpacity onPress={closeSearchModal} style={styles.searchModalCloseBtn} activeOpacity={0.7}>
                 <Ionicons name="close" size={18} color={Colors.muted} />
@@ -460,21 +500,12 @@ export default function HomeScreen() {
             {/* Results body */}
             <View style={styles.searchModalBody}>
               {searchQuery.length === 0 ? (
-                <>
-                  <Text style={styles.searchModalSection}>RECENTI</Text>
-                  {DESTINATIONS.slice(0, 4).map(d => (
-                    <TouchableOpacity key={d.label} style={styles.searchModalItem} onPress={() => navigateToSearch(d.label)} activeOpacity={0.7}>
-                      <View style={styles.searchModalItemIcon}>
-                        <Ionicons name="time-outline" size={17} color={Colors.muted} />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.searchModalItemLabel}>{d.label}</Text>
-                        <Text style={styles.searchModalItemSub}>{d.km} km · {d.min} min a piedi</Text>
-                      </View>
-                      <Ionicons name="chevron-forward" size={15} color="rgba(167,139,250,0.4)" />
-                    </TouchableOpacity>
-                  ))}
-                </>
+                <View style={{ alignItems: 'center', paddingVertical: 32, gap: 8 }}>
+                  <Ionicons name="search-outline" size={34} color={Colors.muted} />
+                  <Text style={{ color: Colors.muted, fontSize: 14 }}>
+                    Inizia a digitare per cercare una destinazione
+                  </Text>
+                </View>
               ) : geoResults.length > 0 ? (
                 <>
                   <Text style={styles.searchModalSection}>RISULTATI</Text>
@@ -482,7 +513,18 @@ export default function HomeScreen() {
                     const dist = geoDistance(r);
                     const short = r.label.split(',').slice(0, 2).join(',');
                     return (
-                      <TouchableOpacity key={`${r.lat}-${r.lng}-${i}`} style={styles.searchModalItem} onPress={() => navigateToSearch(short)} activeOpacity={0.7}>
+                      <TouchableOpacity
+                        key={`${r.lat}-${r.lng}-${i}`}
+                        style={styles.searchModalItem}
+                        activeOpacity={0.7}
+                        onPress={() => {
+                          closeSearchModal();
+                          setTimeout(() => router.push({
+                            pathname: '/(app)/search',
+                            params: { q: short, destLat: String(r.lat), destLng: String(r.lng) }
+                          }), 250);
+                        }}
+                      >
                         <View style={styles.searchModalItemIcon}>
                           <Ionicons name="location-outline" size={17} color={Colors.accent} />
                         </View>
@@ -565,13 +607,19 @@ const styles = StyleSheet.create({
   drawerItem:        { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: Colors.border },
   drawerItemText:    { color: Colors.text, fontSize: 16, fontWeight: '500', flex: 1 },
 
+  activeBanner:      { position: 'absolute', bottom: 8, left: 12, right: 12, zIndex: 11, borderRadius: 18, overflow: 'hidden' },
+  activeBannerInner: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 13 },
+  activeBannerDot:   { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.success },
+  activeBannerText:  { color: Colors.text, fontWeight: '700', fontSize: 15, flex: 1 },
+  activeBannerSub:   { color: 'rgba(255,255,255,0.7)', fontSize: 13 },
+
   sheet:             { position: 'absolute', bottom: 8, left: 12, right: 12, borderRadius: 28, borderWidth: 1, borderColor: 'rgba(167,139,250,0.2)', zIndex: 10, overflow: 'hidden', backgroundColor: 'rgba(8,8,24,0.6)' },
   handleArea:        { alignItems: 'center', paddingVertical: 12 },
   handle:            { width: 36, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.2)' },
   sheetContent:      { paddingHorizontal: 14, paddingBottom: 16, gap: 10 },
 
-  searchPill:        { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(255,255,255,0.07)', borderWidth: 1, borderColor: 'rgba(167,139,250,0.35)', borderRadius: 30, paddingHorizontal: 18, height: 52 },
-  searchPillText:    { color: Colors.muted, fontSize: 16, flex: 1 },
+  searchPill:        { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(255,255,255,0.07)', borderWidth: 1, borderColor: 'rgba(167,139,250,0.3)', borderRadius: 14, paddingHorizontal: 12, height: 44 },
+  searchPillText:    { color: Colors.muted, fontSize: 15, flex: 1 },
 
   actionRow:         { flexDirection: 'row', gap: 10 },
   actionBtn:         { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: 'rgba(255,255,255,0.07)', borderWidth: 1, borderColor: 'rgba(167,139,250,0.2)', borderRadius: 16, paddingVertical: 13 },

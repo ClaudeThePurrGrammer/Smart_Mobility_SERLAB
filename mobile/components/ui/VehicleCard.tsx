@@ -55,17 +55,6 @@ export default function VehicleCard({ vehicle, selected, onPress }: Props) {
         overflow: 'hidden',
       }}
     >
-      {/* Badge "Consigliato" — parte del flusso, non absolute */}
-      {vehicle.recommended && (
-        <View style={{
-          flexDirection: 'row', alignItems: 'center', gap: 4,
-          backgroundColor: Colors.primary,
-          paddingHorizontal: 12, paddingVertical: 5,
-        }}>
-          <Text style={{ color: Colors.text, fontSize: 11, fontWeight: '700' }}>⭐ Consigliato</Text>
-        </View>
-      )}
-
       {/* Contenuto della card */}
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12 }}>
         <View style={{

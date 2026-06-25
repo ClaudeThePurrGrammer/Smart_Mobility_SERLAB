@@ -1,6 +1,7 @@
 """Popola il database con dati reali iniziali (eseguito una sola volta, se vuoto)."""
 import random
 from datetime import datetime, timedelta, timezone
+from sqlalchemy import delete
 
 from sqlalchemy.orm import Session
 
@@ -49,6 +50,54 @@ PROMOTIONS = [
          body="Raggiungi 50 corse e ottieni lo status Gold con il 10% di sconto permanente.",
          reward="-10%", icon="trophy-outline", color="#F59E0B"),
 ]
+
+def cleanup_orphans(db: Session) -> None:
+    """Chiude le corse rimaste 'active'/'paused' (es. crash app, riavvio server).
+
+    Eseguito ad ogni avvio del backend — sicuro e idempotente.
+    Resetta anche lo stato dei veicoli associati a 'available'.
+    """
+    orphans = db.query(Ride).filter(Ride.status.in_(("active", "paused"))).all()
+    if not orphans:
+        return
+    now = datetime.now(timezone.utc)
+    for r in orphans:
+        elapsed_s = max(0.0, (now - r.started_at).total_seconds())
+        r.minutes = max(0, int(elapsed_s / 60))
+        r.status = "completed"
+        r.ended_at = now
+        # Resetta il veicolo associato
+        if r.vehicle_id:
+            v = db.get(Vehicle, r.vehicle_id)
+            if v and v.status == "in_use":
+                v.status = "available"
+    db.commit()
+    print(f"[cleanup] Chiuse {len(orphans)} corse orfane.")
+
+
+def reset_and_reseed(db: Session) -> None:
+    """Azzera tutti i dati utente e risemina da zero.
+
+    Mantiene: veicoli, aree di sosta, promozioni, aree di restrizione.
+    Cancella: utenti, corse, transazioni, messaggi, segnalazioni.
+    Usare con: docker exec smart_mobility_api python -c "from app.seed import *; from app.database import SessionLocal; db=SessionLocal(); reset_and_reseed(db); db.close()"
+    """
+    from .models import Segnalazione, Message, WalletTransaction, PaymentMethod
+    # Ordine: dipendenze prima
+    db.execute(delete(Segnalazione))
+    db.execute(delete(Message))
+    db.execute(delete(WalletTransaction))
+    db.execute(delete(PaymentMethod))
+    db.execute(delete(Ride))
+    db.execute(delete(User))
+    # Resetta stato veicoli
+    for v in db.query(Vehicle).all():
+        v.status = "available"
+    db.commit()
+    # Risemina utenti e dati correlati
+    seed(db)
+    print("[reset_and_reseed] DB azzerato e riseminato con dati puliti.")
+
 
 def seed(db: Session) -> None:
     if db.query(Vehicle).count() == 0:

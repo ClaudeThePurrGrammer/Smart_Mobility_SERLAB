@@ -38,6 +38,18 @@ def active_ride(user: User = Depends(get_current_user), db: Session = Depends(ge
 
 @router.post("", response_model=RideOut, status_code=status.HTTP_201_CREATED)
 def start_ride(data: RideCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # ── FIX: impedisce di avviare una nuova corsa se ce n'è già una in corso ──
+    existing = (
+        db.query(Ride)
+        .filter(Ride.user_id == user.id, Ride.status.in_(("active", "paused")))
+        .first()
+    )
+    if existing:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Hai già una corsa in corso (ID {existing.id}). Termina quella precedente prima di iniziarne una nuova.",
+        )
+
     vehicle = db.get(Vehicle, data.vehicle_id) if data.vehicle_id else None
     if vehicle:
         if vehicle.status != "available":
@@ -80,18 +92,29 @@ def end_ride(ride_id: int, data: RideEnd, user: User = Depends(get_current_user)
     if ride.status not in ("active", "paused"):
         raise HTTPException(status.HTTP_409_CONFLICT, "Corsa già conclusa")
 
+    now = datetime.now(timezone.utc)
+
+    # ── FIX CRITICO: calcola i minuti server-side da started_at ──────────────
+    # Non ci fidiamo del valore inviato dal client (potrebbe essere gonfiato
+    # se il timer era partito da una corsa orfana con started_at molto vecchio).
+    elapsed_s = max(0.0, (now - ride.started_at).total_seconds())
+    minutes = max(1, int(elapsed_s / 60))
+
+    # km: accetta dal client se positivo e ragionevole; altrimenti stima da minuti
+    km = data.km if (0 < data.km < 200) else round(minutes * 0.2, 1)
+
     vehicle = db.get(Vehicle, ride.vehicle_id) if ride.vehicle_id else None
     unlock = vehicle.unlock_fee if vehicle else 1.0
     per_min = vehicle.price_per_min if vehicle else 0.22
-    cost = round(unlock + data.minutes * per_min, 2)
-    points = POINTS_PER_RIDE + (ECO_BONUS_POINTS if data.km >= ECO_BONUS_KM else 0)
+    cost = round(unlock + minutes * per_min, 2)
+    points = POINTS_PER_RIDE + (ECO_BONUS_POINTS if km >= ECO_BONUS_KM else 0)
 
-    ride.km = data.km
-    ride.minutes = data.minutes
+    ride.km = km
+    ride.minutes = minutes
     ride.cost = cost
     ride.points = points
     ride.status = "completed"
-    ride.ended_at = datetime.now(timezone.utc)
+    ride.ended_at = now
 
     if vehicle:
         vehicle.status = "available"
@@ -106,7 +129,7 @@ def end_ride(ride_id: int, data: RideEnd, user: User = Depends(get_current_user)
     ))
     db.add(Message(
         user_id=user.id, type="ride", title="Corsa terminata",
-        body=f"La tua corsa di {data.km:.1f} km è stata completata. Costo: € {cost:.2f}.",
+        body=f"La tua corsa di {km:.1f} km è stata completata. Costo: € {cost:.2f}.",
     ))
 
     db.commit()

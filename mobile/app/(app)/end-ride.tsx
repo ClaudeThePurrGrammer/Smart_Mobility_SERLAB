@@ -6,6 +6,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Colors, Gradients } from '@/constants/theme';
 import { useAuth } from '@/lib/auth/AuthContext';
+import { useRideSession } from '@/lib/ride/RideSessionContext';
 import { reportsApi, parkingApi } from '@/lib/api/endpoints';
 import { vehicleTypeLabel, vehicleIcon } from '@/lib/vehicles';
 import { haversineMeters, formatDistance } from '@/lib/geo';
@@ -23,6 +24,7 @@ const DEFAULT_CENTER = { latitude: 41.1177, longitude: 16.8718 };
 
 export default function EndRideScreen() {
   const { token } = useAuth();
+  const { endSession } = useRideSession();
   const params = useLocalSearchParams<{
     km?: string; minutes?: string; cost?: string; points?: string;
     vehicleType?: string; endLat?: string; endLng?: string;
@@ -30,10 +32,10 @@ export default function EndRideScreen() {
   const [rating, setRating] = useState(0);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
 
-  const km = Number(params.km ?? 2.4);
-  const minutes = Number(params.minutes ?? 12);
-  const cost = Number(params.cost ?? 3.6);
-  const points = Number(params.points ?? 18);
+  const km = Number(params.km ?? 0);
+  const minutes = Number(params.minutes ?? 0);
+  const cost = Number(params.cost ?? 0);
+  const points = Number(params.points ?? 0);
   const vtype = (params.vehicleType ?? 'scooter') as VehicleType;
 
   const endCoords = (params.endLat && params.endLng)
@@ -72,6 +74,9 @@ export default function EndRideScreen() {
         });
       } catch {}
     }
+    // Safety net: garantisce che la sessione locale sia sempre pulita
+    // anche se active-ride non ha chiamato endSession() (es. crash, back gesture).
+    endSession();
     router.replace('/(app)');
   };
 

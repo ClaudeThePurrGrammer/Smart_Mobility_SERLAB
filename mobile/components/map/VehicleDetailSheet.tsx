@@ -194,7 +194,7 @@ export default function VehicleDetailSheet({ vehicle, userCoords, onClose, onRes
             style={styles.reserveGradient}
           >
             <Ionicons name="flash" size={18} color={Colors.text} />
-            <Text style={styles.reserveText}>Prenota ora</Text>
+            <Text style={styles.reserveText}>Seleziona mezzo</Text>
           </LinearGradient>
         </TouchableOpacity>
       </Animated.View>

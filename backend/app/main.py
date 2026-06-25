@@ -10,7 +10,7 @@ from .routers import (
     amministrazione, auth, geo, messages, operatore, parking, payment, promotions,
     realtime, reports, restrizioni, rides, segnalazioni, users, vehicles, wallet,
 )
-from .seed import seed
+from .seed import cleanup_orphans, seed
 
 
 def _ensure_schema() -> None:
@@ -35,6 +35,7 @@ async def lifespan(_app: FastAPI):
     Base.metadata.create_all(bind=engine)
     _ensure_schema()
     with SessionLocal() as db:
+        cleanup_orphans(db)   # chiude corse orfane prima di ogni altra operazione
         seed(db)
     yield
 

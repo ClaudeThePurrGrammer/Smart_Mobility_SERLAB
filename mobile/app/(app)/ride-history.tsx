@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Colors } from '@/constants/theme';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { ridesApi } from '@/lib/api/endpoints';
@@ -31,13 +31,18 @@ export default function RideHistoryScreen() {
   const [rides, setRides] = useState<ApiRide[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (!token) return;
-    ridesApi.history(token)
-      .then(setRides)
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [token]);
+  // Rifetch ad ogni apertura della schermata: lo storico deve riflettere
+  // le corse appena terminate senza richiedere un logout/login.
+  useFocusEffect(
+    useCallback(() => {
+      if (!token) return;
+      setLoading(true);
+      ridesApi.history(token)
+        .then(setRides)
+        .catch(() => {})
+        .finally(() => setLoading(false));
+    }, [token]),
+  );
 
   const filtered = filter === 'Questo mese'
     ? rides.filter(r => isThisMonth(r.started_at))
@@ -45,9 +50,9 @@ export default function RideHistoryScreen() {
     ? rides.filter(r => !isThisMonth(r.started_at))
     : rides;
 
-  const totKm   = filtered.reduce((s, r) => s + r.km, 0).toFixed(1);
-  const totEur  = filtered.reduce((s, r) => s + r.cost, 0).toFixed(2);
-  const totPts  = filtered.reduce((s, r) => s + r.points, 0);
+  const totKm   = filtered.reduce((s, r) => s + (r.km   ?? 0), 0).toFixed(1);
+  const totEur  = filtered.reduce((s, r) => s + (r.cost  ?? 0), 0).toFixed(2);
+  const totPts  = filtered.reduce((s, r) => s + (r.points ?? 0), 0);
 
   return (
     <View style={styles.container}>
@@ -110,15 +115,15 @@ export default function RideHistoryScreen() {
               <Text style={styles.rideRoute} numberOfLines={1}>{ride.from_addr} → {ride.to_addr}</Text>
               <View style={styles.rideMeta}>
                 <Ionicons name="map-outline" size={12} color={Colors.muted} />
-                <Text style={styles.rideMetaText}>{ride.km} km</Text>
+                <Text style={styles.rideMetaText}>{ride.km ?? 0} km</Text>
                 <Ionicons name="time-outline" size={12} color={Colors.muted} />
-                <Text style={styles.rideMetaText}>{ride.minutes} min</Text>
+                <Text style={styles.rideMetaText}>{ride.minutes ?? 0} min</Text>
                 <Ionicons name="star-outline" size={12} color={Colors.warning} />
-                <Text style={[styles.rideMetaText, { color: Colors.warning }]}>+{ride.points} pt</Text>
+                <Text style={[styles.rideMetaText, { color: Colors.warning }]}>+{ride.points ?? 0} pt</Text>
               </View>
             </View>
             <View style={styles.rideCost}>
-              <Text style={styles.rideCostValue}>€ {ride.cost.toFixed(2)}</Text>
+              <Text style={styles.rideCostValue}>€ {(ride.cost ?? 0).toFixed(2)}</Text>
               <Ionicons name="chevron-forward" size={16} color={Colors.muted} />
             </View>
           </TouchableOpacity>

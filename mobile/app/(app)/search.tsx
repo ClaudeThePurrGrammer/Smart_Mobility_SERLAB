@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import { BlurView } from 'expo-blur';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Colors, Gradients } from '@/constants/theme';
@@ -13,6 +13,7 @@ import VehicleCard, { Vehicle } from '@/components/ui/VehicleCard';
 import { vehiclesApi, ridesApi, geoApi } from '@/lib/api/endpoints';
 import type { ApiVehicle, ApiRouteOption } from '@/lib/api/types';
 import { useAuth } from '@/lib/auth/AuthContext';
+import { useRideSession } from '@/lib/ride/RideSessionContext';
 import { useDeviceLocation } from '@/lib/useDeviceLocation';
 import { haversineMeters, walkMinutes } from '@/lib/geo';
 
@@ -33,12 +34,72 @@ type TypeFilter     = 'tutti' | 'scooter' | 'ebike' | 'bike';
 type BatteryFilter  = 'tutti' | '50' | '70';
 type DistanceFilter = 'tutti' | '200' | '500';
 
-const TABS = ['Miglior scelta', 'Più veloce', 'Più economico'] as const;
 const MAX_VEHICLES = 60;
+
+/**
+ * Calcola il "mezzo idoneo" per la destinazione scelta.
+ * Criteri (dal Class Diagram GestioneCorsa e modello Percorso):
+ *   - Percorso non ristretto (percorsoConRestrizioni = false) → preferito
+ *   - Batteria più alta (batteria)
+ *   - Distanza utente→mezzo più bassa (coordenate)
+ *   - Costo stimato più basso (tipoMezzo, distanza)
+ * Ogni fattore è normalizzato 0–1; punteggio composito pesato.
+ */
+function computeMezzoIdoneo(vehicles: Vehicle[], routesByType: Record<string, ApiRouteOption[]>): Vehicle | null {
+  if (vehicles.length === 0) return null;
+
+  const maxDist = Math.max(...vehicles.map(v => v.distanceToM), 1);
+  const maxCost = Math.max(...vehicles.map(v => v.estimatedEur), 1);
+
+  const scored = vehicles.map(v => {
+    const opt = routesByType[v.type]?.[0] ?? null;
+    const notRestricted = opt ? (opt.restricted ? 0 : 1) : 0;
+    const battery  = v.batteryPct / 100;                          // 0–1, higher is better
+    const proximity = 1 - v.distanceToM / maxDist;               // 0–1, closer is better
+    const economy   = maxCost > 0 ? 1 - v.estimatedEur / maxCost : 1; // 0–1, cheaper is better
+
+    // Option B — balanced user-centric: batteria 35%, prossimità 35%, costo 20%, restrizioni 10%
+    const score = battery * 0.35 + proximity * 0.35 + economy * 0.20 + notRestricted * 0.10;
+    return { vehicle: v, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored[0].vehicle;
+}
+
+/**
+ * Trova il percorso più veloce tra tutti i tipi di mezzo disponibili.
+ * Scorre routesByType, prende la prima opzione per ogni tipo (già ordinata
+ * per ottimalità dal backend) e restituisce quella con duration_min minore.
+ * Esclude percorsi con restrizioni se esiste almeno un'alternativa libera.
+ */
+function computePercorsoVeloce(
+  routesByType: Record<string, ApiRouteOption[]>,
+  vehicles: Vehicle[],
+): { route: ApiRouteOption; vehicleType: string } | null {
+  const candidates: { route: ApiRouteOption; vehicleType: string }[] = [];
+
+  for (const [type, options] of Object.entries(routesByType)) {
+    // Only consider types that have at least one available vehicle
+    if (!vehicles.some(v => v.type === type)) continue;
+    if (options.length === 0) continue;
+    // Take the best (first) option for this vehicle type
+    candidates.push({ route: options[0], vehicleType: type });
+  }
+
+  if (candidates.length === 0) return null;
+
+  // Prefer unrestricted routes; among those pick minimum duration
+  const free = candidates.filter(c => !c.route.restricted);
+  const pool = free.length > 0 ? free : candidates;
+  pool.sort((a, b) => a.route.duration_min - b.route.duration_min);
+  return pool[0];
+}
 
 export default function SearchScreen() {
   const params = useLocalSearchParams<{ q?: string; destLat?: string; destLng?: string }>();
   const { token } = useAuth();
+  const { startSession } = useRideSession();
   const { coords } = useDeviceLocation();
 
   const origin = coords ?? DEFAULT_CENTER;
@@ -119,12 +180,25 @@ export default function SearchScreen() {
     });
   }, [rawVehicles, routesByType, origin.latitude, origin.longitude]);
 
-  const [activeTab, setActiveTab] = useState<typeof TABS[number]>('Miglior scelta');
   const [selected, setSelected]   = useState<Vehicle | null>(null);
+
+  // ── Estensione UC: VisualizzaMezzoIdoneo (attivata esplicitamente dall'utente) ──
+  const [idoneoVehicle, setIdoneoVehicle] = useState<Vehicle | null>(null);
+  const [idoneoVisible, setIdoneoVisible] = useState(false);
+  const [percorsoVeloce, setPercorsoVeloce]               = useState<{ route: ApiRouteOption; vehicleType: string } | null>(null);
+  const [percorsoVeloceVisible, setPercorsoVeloceVisible] = useState(false);
 
   useEffect(() => {
     setSelected((cur) => allVehicles.find((v) => v.id === cur?.id) ?? allVehicles[0] ?? null);
   }, [allVehicles]);
+
+  // Reset del mezzo idoneo / percorso veloce quando cambia la destinazione.
+  useEffect(() => {
+    setIdoneoVehicle(null);
+    setIdoneoVisible(false);
+    setPercorsoVeloce(null);
+    setPercorsoVeloceVisible(false);
+  }, [destination?.lat, destination?.lng]);
 
   const startRide = async (vehicle: Vehicle) => {
     const opt = optimalFor(vehicle.type);
@@ -136,10 +210,12 @@ export default function SearchScreen() {
           from_addr: 'Posizione attuale',
           to_addr: destination?.label ?? '',
         });
+        startSession(ride);
         router.push({
           pathname: '/(app)/active-ride',
           params: {
             rideId: String(ride.id),
+            vehicleId: vehicle.id,
             fromLat: String(origin.latitude), fromLng: String(origin.longitude),
             ...(destination ? { toLat: String(destination.lat), toLng: String(destination.lng), dest: destination.label } : {}),
             ...(opt ? { km: String(vehicle.tripKm), durMin: String(opt.duration_min) } : {}),
@@ -149,6 +225,21 @@ export default function SearchScreen() {
       }
     } catch { /* prosegue comunque */ }
     router.push('/(app)/active-ride');
+  };
+
+  // Estensione UC CercaDestinazione → VisualizzaMezzoIdoneo: calcola e mostra
+  // il singolo mezzo migliore in un bottom-sheet dedicato (azione esplicita).
+  const handleVisualizzaMezzoIdoneo = () => {
+    const best = computeMezzoIdoneo(filteredVehicles, routesByType);
+    setIdoneoVehicle(best);
+    setIdoneoVisible(true);
+  };
+
+  // Estensione UC: PercorsoPiùVeloceReal-Time — calcola il tragitto più rapido.
+  const handleVisualizzaPercorsoVeloce = () => {
+    const best = computePercorsoVeloce(routesByType, filteredVehicles);
+    setPercorsoVeloce(best);
+    setPercorsoVeloceVisible(true);
   };
 
   // ── Search modal (geocoding reale) ─────────────────────────────────────────
@@ -220,11 +311,8 @@ export default function SearchScreen() {
     if (typeFilter !== 'tutti')     list = list.filter(v => v.type === typeFilter);
     if (batteryFilter !== 'tutti')  list = list.filter(v => v.batteryPct >= parseInt(batteryFilter));
     if (distanceFilter !== 'tutti') list = list.filter(v => v.distanceToM <= parseInt(distanceFilter));
-    if (activeTab === 'Più veloce')         list.sort((a, b) => a.tripKm - b.tripKm);
-    else if (activeTab === 'Più economico') list.sort((a, b) => a.estimatedEur - b.estimatedEur);
-    else list.sort((a, b) => (b.recommended ? 1 : 0) - (a.recommended ? 1 : 0));
     return list;
-  }, [allVehicles, typeFilter, batteryFilter, distanceFilter, activeTab]);
+  }, [allVehicles, typeFilter, batteryFilter, distanceFilter]);
 
   useEffect(() => {
     cardAnims.forEach(a => { a.opacity.setValue(0); a.translateY.setValue(18); });
@@ -344,16 +432,42 @@ export default function SearchScreen() {
           </View>
         )}
 
-        {/* Sort tabs */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsScroll} contentContainerStyle={{ gap: 10, paddingHorizontal: 16 }}>
-          {TABS.map(tab => (
-            <TouchableOpacity key={tab} onPress={() => setActiveTab(tab)} style={[styles.tab, activeTab === tab && styles.tabActive]} activeOpacity={0.75}>
-              <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
-                {tab === 'Miglior scelta' ? '⭐ ' : tab === 'Più veloce' ? '⚡ ' : '$ '}{tab}
-              </Text>
+        {/* Estensioni UC (solo con destinazione scelta): attivate su pressione esplicita */}
+        {destination !== null && (
+          <>
+            <TouchableOpacity
+              style={styles.idoneoBtn}
+              onPress={handleVisualizzaMezzoIdoneo}
+              activeOpacity={0.85}
+              disabled={!destination || routesLoading}
+            >
+              <LinearGradient
+                colors={Gradients.primaryBtn}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                style={styles.idoneoBtnGradient}
+              >
+                <Ionicons name="star" size={18} color={Colors.text} />
+                <Text style={styles.idoneoBtnText}>Visualizza Mezzo Idoneo</Text>
+              </LinearGradient>
             </TouchableOpacity>
-          ))}
-        </ScrollView>
+
+            <TouchableOpacity
+              style={styles.idoneoBtn}
+              onPress={handleVisualizzaPercorsoVeloce}
+              activeOpacity={0.85}
+              disabled={!destination || routesLoading}
+            >
+              <LinearGradient
+                colors={['#1e3a5f', '#0f2744']}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                style={styles.idoneoBtnGradient}
+              >
+                <Ionicons name="flash" size={18} color={Colors.text} />
+                <Text style={styles.idoneoBtnText}>Visualizza Percorso Più Veloce</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </>
+        )}
 
         {/* Lista mezzi */}
         <View style={styles.vehicleSection}>
@@ -503,6 +617,302 @@ export default function SearchScreen() {
           </Animated.View>
         </View>
       )}
+
+      {/* Bottom sheet: Mezzo Idoneo (estensione UC) */}
+      {idoneoVisible && idoneoVehicle && (
+        <View style={[StyleSheet.absoluteFillObject, { zIndex: 60 }]} pointerEvents="box-none">
+          {/* Dim backdrop */}
+          <TouchableOpacity
+            style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.6)' }]}
+            activeOpacity={1}
+            onPress={() => setIdoneoVisible(false)}
+          />
+          {/* Sheet */}
+          <View style={styles.idoneoSheet}>
+            {/* Header */}
+            <View style={styles.idoneoSheetHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.idoneoSheetTitle}>Mezzo Idoneo</Text>
+                <Text style={styles.idoneoSheetSub}>
+                  Calcolato su batteria e vicinanza (35% ciascuno), costo (20%) e percorso libero (10%)
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setIdoneoVisible(false)} style={styles.idoneoCloseBtn}>
+                <Ionicons name="close" size={18} color={Colors.muted} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Star badge */}
+            <View style={styles.idoneoBadgeRow}>
+              <LinearGradient colors={Gradients.primaryBtn} style={styles.idoneoBadge}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
+                <Ionicons name="star" size={13} color={Colors.text} />
+                <Text style={styles.idoneoBadgeText}>CONSIGLIATO PER TE</Text>
+              </LinearGradient>
+            </View>
+
+            {/* Vehicle card — reuse VehicleCard component */}
+            <View style={{ paddingHorizontal: 4 }}>
+              <VehicleCard
+                vehicle={idoneoVehicle}
+                selected={true}
+                onPress={() => {}}
+              />
+            </View>
+
+            {/* Score breakdown */}
+            {(() => {
+              const opt = routesByType[idoneoVehicle.type]?.[0] ?? null;
+              return (
+                <View style={styles.idoneoScoreRow}>
+                  <View style={styles.idoneoScoreItem}>
+                    <Ionicons name="battery-charging-outline" size={16}
+                      color={idoneoVehicle.batteryPct > 50 ? Colors.success : Colors.warning} />
+                    <Text style={styles.idoneoScoreLabel}>{idoneoVehicle.batteryPct}% batteria</Text>
+                  </View>
+                  <View style={styles.idoneoScoreItem}>
+                    <Ionicons name="walk-outline" size={16} color={Colors.accent} />
+                    <Text style={styles.idoneoScoreLabel}>{idoneoVehicle.distanceToM}m da te</Text>
+                  </View>
+                  <View style={styles.idoneoScoreItem}>
+                    <Ionicons
+                      name={opt?.restricted ? 'warning-outline' : 'checkmark-circle-outline'}
+                      size={16}
+                      color={opt?.restricted ? Colors.warning : Colors.success}
+                    />
+                    <Text style={styles.idoneoScoreLabel}>
+                      {opt?.restricted ? 'Percorso con limiti' : 'Percorso libero'}
+                    </Text>
+                  </View>
+                </View>
+              );
+            })()}
+
+            {/* CTA */}
+            <TouchableOpacity
+              style={styles.idoneoStartBtn}
+              onPress={() => {
+                setIdoneoVisible(false);
+                startRide(idoneoVehicle);
+              }}
+              activeOpacity={0.85}
+              disabled={!destination}
+            >
+              <LinearGradient colors={Gradients.primaryBtn} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                style={styles.idoneoStartGradient}>
+                <Ionicons name="flash" size={18} color={Colors.text} />
+                <Text style={styles.idoneoStartText}>Usa questo mezzo</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {/* Bottom sheet: Percorso Più Veloce (estensione UC) */}
+      {percorsoVeloceVisible && percorsoVeloce && (
+        <View style={[StyleSheet.absoluteFillObject, { zIndex: 61 }]} pointerEvents="box-none">
+          {/* Backdrop */}
+          <TouchableOpacity
+            style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.6)' }]}
+            activeOpacity={1}
+            onPress={() => setPercorsoVeloceVisible(false)}
+          />
+
+          {/* Sheet */}
+          <View style={styles.idoneoSheet}>
+
+            {/* Header */}
+            <View style={styles.idoneoSheetHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.idoneoSheetTitle}>Percorso Più Veloce</Text>
+                <Text style={styles.idoneoSheetSub}>
+                  Il tragitto con minor tempo stimato tra tutti i mezzi disponibili
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setPercorsoVeloceVisible(false)}
+                style={styles.idoneoCloseBtn}
+              >
+                <Ionicons name="close" size={18} color={Colors.muted} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Badge */}
+            <View style={styles.idoneoBadgeRow}>
+              <LinearGradient
+                colors={['#1e3a5f', '#0f2744']}
+                style={styles.idoneoBadge}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+              >
+                <Ionicons name="flash" size={13} color={Colors.text} />
+                <Text style={styles.idoneoBadgeText}>PERCORSO PIÙ RAPIDO</Text>
+              </LinearGradient>
+            </View>
+
+            {/* Banner veicolo consigliato per il percorso */}
+            {(() => {
+              const bestVehicleForType = filteredVehicles.find(
+                v => v.type === percorsoVeloce.vehicleType
+              );
+              if (!bestVehicleForType) return null;
+              return (
+                <View style={styles.percorsoVehicleBanner}>
+                  <View style={styles.percorsoVehicleBannerIcon}>
+                    <MaterialCommunityIcons
+                      name={
+                        percorsoVeloce.vehicleType === 'scooter' ? 'scooter' :
+                        percorsoVeloce.vehicleType === 'ebike'   ? 'bicycle-electric' :
+                        percorsoVeloce.vehicleType === 'bike'    ? 'bicycle' : 'car-electric'
+                      }
+                      size={22}
+                      color={Colors.accent}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.percorsoVehicleBannerTitle}>
+                      Utilizzando Questo Veicolo
+                    </Text>
+                    <Text style={styles.percorsoVehicleBannerSub} numberOfLines={1}>
+                      {bestVehicleForType.name} · {bestVehicleForType.model} ·{' '}
+                      {bestVehicleForType.batteryPct}% batteria ·{' '}
+                      {bestVehicleForType.distanceToM}m da te
+                    </Text>
+                  </View>
+                  <Text style={styles.percorsoVehicleBannerPrice}>
+                    € {bestVehicleForType.estimatedEur.toFixed(2)}
+                  </Text>
+                </View>
+              );
+            })()}
+
+            {/* Route stats card */}
+            <View style={styles.percorsoCard}>
+              {/* Vehicle type row */}
+              <View style={styles.percorsoTypeRow}>
+                <MaterialCommunityIcons
+                  name={
+                    percorsoVeloce.vehicleType === 'scooter' ? 'scooter' :
+                    percorsoVeloce.vehicleType === 'ebike'   ? 'bicycle-electric' :
+                    percorsoVeloce.vehicleType === 'bike'    ? 'bicycle' : 'car-electric'
+                  }
+                  size={22}
+                  color={Colors.accent}
+                />
+                <Text style={styles.percorsoTypeLabel}>
+                  {percorsoVeloce.vehicleType === 'scooter' ? 'Monopattino' :
+                   percorsoVeloce.vehicleType === 'ebike'   ? 'E-Bike' :
+                   percorsoVeloce.vehicleType === 'bike'    ? 'Bicicletta' : 'Auto elettrica'}
+                </Text>
+                {percorsoVeloce.route.restricted && (
+                  <View style={styles.restrictedPill}>
+                    <Ionicons name="warning-outline" size={12} color={Colors.warning} />
+                    <Text style={styles.restrictedPillText}>Zona limitata</Text>
+                  </View>
+                )}
+              </View>
+
+              {/* Stat row */}
+              <View style={styles.percorsoStats}>
+                <View style={styles.percorsoStat}>
+                  <Ionicons name="time-outline" size={20} color={Colors.accent} />
+                  <Text style={styles.percorsoStatValue}>
+                    {percorsoVeloce.route.duration_min} min
+                  </Text>
+                  <Text style={styles.percorsoStatLabel}>Tempo stimato</Text>
+                </View>
+                <View style={[styles.percorsoStat, styles.percorsoStatBorder]}>
+                  <Ionicons name="navigate-outline" size={20} color={Colors.accent} />
+                  <Text style={styles.percorsoStatValue}>
+                    {(percorsoVeloce.route.distance_m / 1000).toFixed(1)} km
+                  </Text>
+                  <Text style={styles.percorsoStatLabel}>Distanza</Text>
+                </View>
+                <View style={styles.percorsoStat}>
+                  <Ionicons
+                    name={percorsoVeloce.route.restricted ? 'warning-outline' : 'checkmark-circle-outline'}
+                    size={20}
+                    color={percorsoVeloce.route.restricted ? Colors.warning : Colors.success}
+                  />
+                  <Text style={styles.percorsoStatValue}>
+                    {percorsoVeloce.route.restricted ? 'Limitato' : 'Libero'}
+                  </Text>
+                  <Text style={styles.percorsoStatLabel}>Percorso</Text>
+                </View>
+              </View>
+
+              {/* Route label */}
+              <Text style={styles.percorsoRouteLabel}>{percorsoVeloce.route.label}</Text>
+
+              {/* Restricted areas warning */}
+              {percorsoVeloce.route.restricted && percorsoVeloce.route.aree_vietate.length > 0 && (
+                <View style={styles.percorsoWarnBox}>
+                  <Ionicons name="warning-outline" size={14} color={Colors.warning} />
+                  <Text style={styles.percorsoWarnText}>
+                    Attraversa: {percorsoVeloce.route.aree_vietate.join(', ')}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* Map mini-preview of the fastest route polyline */}
+            {percorsoVeloce.route.points.length > 1 && destination && (
+              <View style={styles.percorsoMapCard}>
+                <MapView
+                  provider={PROVIDER_GOOGLE}
+                  style={StyleSheet.absoluteFillObject}
+                  region={{
+                    latitude:  (percorsoVeloce.route.points[0].latitude  + destination.lat) / 2,
+                    longitude: (percorsoVeloce.route.points[0].longitude + destination.lng) / 2,
+                    latitudeDelta: 0.04, longitudeDelta: 0.04,
+                  }}
+                  customMapStyle={DARK_MAP_STYLE}
+                  pointerEvents="none"
+                >
+                  <Polyline
+                    coordinates={percorsoVeloce.route.points}
+                    strokeColor={Colors.accent}
+                    strokeWidth={5}
+                  />
+                  <Marker coordinate={percorsoVeloce.route.points[0]}>
+                    <View style={styles.originDot}>
+                      <Ionicons name="radio-button-on" size={18} color={Colors.primary} />
+                    </View>
+                  </Marker>
+                  <Marker coordinate={{ latitude: destination.lat, longitude: destination.lng }}>
+                    <View style={styles.destDot}>
+                      <Ionicons name="location" size={20} color={Colors.success} />
+                    </View>
+                  </Marker>
+                </MapView>
+              </View>
+            )}
+
+            {/* CTA */}
+            <TouchableOpacity
+              style={styles.idoneoStartBtn}
+              onPress={() => {
+                setPercorsoVeloceVisible(false);
+                // Select the best vehicle of the recommended type and start ride
+                const bestForType = filteredVehicles.find(
+                  v => v.type === percorsoVeloce.vehicleType
+                ) ?? filteredVehicles[0];
+                if (bestForType) startRide(bestForType);
+              }}
+              activeOpacity={0.85}
+              disabled={!destination}
+            >
+              <LinearGradient
+                colors={['#1e3a5f', '#0f2744']}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                style={styles.idoneoStartGradient}
+              >
+                <Ionicons name="flash" size={18} color={Colors.text} />
+                <Text style={styles.idoneoStartText}>Usa questo percorso</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
@@ -535,12 +945,6 @@ const styles = StyleSheet.create({
   routeLabel:          { color: Colors.text, fontSize: 13, fontWeight: '600' },
   routeWarn:           { color: Colors.warning, fontSize: 11, marginTop: 2 },
   routeMeta:           { color: Colors.muted, fontSize: 12, fontWeight: '600' },
-
-  tabsScroll:          { marginBottom: 16 },
-  tab:                 { backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 8 },
-  tabActive:           { backgroundColor: 'rgba(124,58,237,0.2)', borderColor: Colors.primary },
-  tabText:             { color: Colors.muted, fontSize: 13, fontWeight: '500' },
-  tabTextActive:       { color: Colors.text, fontWeight: '700' },
 
   vehicleSection:      { gap: 12 },
   vehicleSectionHeader:{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16 },
@@ -588,4 +992,75 @@ const styles = StyleSheet.create({
   applyBtn:            { borderRadius: 16, overflow: 'hidden', marginTop: 4 },
   applyBtnGradient:    { alignItems: 'center', justifyContent: 'center', paddingVertical: 15 },
   applyBtnText:        { color: Colors.text, fontSize: 16, fontWeight: '700' },
+
+  idoneoBtn:           { borderRadius: 14, overflow: 'hidden', marginHorizontal: 16, marginBottom: 12 },
+  idoneoBtnGradient:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                         gap: 8, paddingVertical: 13 },
+  idoneoBtnText:       { color: Colors.text, fontSize: 15, fontWeight: '700' },
+
+  idoneoSheet:         { position: 'absolute', bottom: 0, left: 0, right: 0,
+                         backgroundColor: 'rgba(13,13,26,0.98)',
+                         borderTopLeftRadius: 28, borderTopRightRadius: 28,
+                         borderWidth: 1, borderBottomWidth: 0,
+                         borderColor: 'rgba(167,139,250,0.3)',
+                         paddingHorizontal: 16, paddingBottom: 32, paddingTop: 8 },
+  idoneoSheetHeader:   { flexDirection: 'row', alignItems: 'flex-start',
+                         paddingVertical: 16, gap: 12 },
+  idoneoSheetTitle:    { color: Colors.text, fontSize: 18, fontWeight: '800' },
+  idoneoSheetSub:      { color: Colors.muted, fontSize: 12, marginTop: 3 },
+  idoneoCloseBtn:      { width: 32, height: 32, borderRadius: 16,
+                         backgroundColor: 'rgba(255,255,255,0.08)',
+                         alignItems: 'center', justifyContent: 'center' },
+  idoneoBadgeRow:      { marginBottom: 10 },
+  idoneoBadge:         { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
+                         borderRadius: 20, paddingHorizontal: 12, paddingVertical: 5 },
+  idoneoBadgeText:     { color: Colors.text, fontSize: 11, fontWeight: '800', letterSpacing: 1 },
+  idoneoScoreRow:      { flexDirection: 'row', gap: 8, marginTop: 12, marginBottom: 4,
+                         flexWrap: 'wrap' },
+  idoneoScoreItem:     { flexDirection: 'row', alignItems: 'center', gap: 5,
+                         backgroundColor: Colors.surface, borderWidth: 1,
+                         borderColor: Colors.border, borderRadius: 20,
+                         paddingHorizontal: 10, paddingVertical: 5 },
+  idoneoScoreLabel:    { color: Colors.muted, fontSize: 12 },
+  idoneoStartBtn:      { borderRadius: 16, overflow: 'hidden', marginTop: 16 },
+  idoneoStartGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+                         gap: 8, paddingVertical: 15 },
+  idoneoStartText:     { color: Colors.text, fontSize: 16, fontWeight: '700' },
+
+  percorsoCard:       { backgroundColor: Colors.surface, borderWidth: 1,
+                        borderColor: Colors.border, borderRadius: 16,
+                        padding: 14, gap: 12, marginBottom: 12 },
+  percorsoTypeRow:    { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  percorsoTypeLabel:  { color: Colors.text, fontWeight: '700', fontSize: 15, flex: 1 },
+  restrictedPill:     { flexDirection: 'row', alignItems: 'center', gap: 4,
+                        backgroundColor: 'rgba(245,158,11,0.15)',
+                        borderWidth: 1, borderColor: Colors.warning,
+                        borderRadius: 20, paddingHorizontal: 8, paddingVertical: 3 },
+  restrictedPillText: { color: Colors.warning, fontSize: 11, fontWeight: '600' },
+  percorsoStats:      { flexDirection: 'row', backgroundColor: Colors.card,
+                        borderWidth: 1, borderColor: Colors.border, borderRadius: 14 },
+  percorsoStat:       { flex: 1, alignItems: 'center', paddingVertical: 12, gap: 4 },
+  percorsoStatBorder: { borderLeftWidth: 1, borderRightWidth: 1,
+                        borderColor: Colors.border },
+  percorsoStatValue:  { color: Colors.text, fontWeight: '800', fontSize: 15 },
+  percorsoStatLabel:  { color: Colors.muted, fontSize: 11 },
+  percorsoRouteLabel: { color: Colors.muted, fontSize: 13, lineHeight: 18 },
+  percorsoWarnBox:    { flexDirection: 'row', alignItems: 'flex-start', gap: 6,
+                        backgroundColor: 'rgba(245,158,11,0.08)',
+                        borderWidth: 1, borderColor: 'rgba(245,158,11,0.3)',
+                        borderRadius: 10, padding: 10 },
+  percorsoWarnText:   { color: Colors.warning, fontSize: 12, flex: 1, lineHeight: 17 },
+  percorsoMapCard:    { height: 150, borderRadius: 14, overflow: 'hidden',
+                        borderWidth: 1, borderColor: Colors.border, marginBottom: 12 },
+  percorsoVehicleBanner:      { flexDirection: 'row', alignItems: 'center', gap: 12,
+                                 backgroundColor: 'rgba(79,142,247,0.1)',
+                                 borderWidth: 1, borderColor: 'rgba(79,142,247,0.35)',
+                                 borderRadius: 14, padding: 12, marginBottom: 12 },
+  percorsoVehicleBannerIcon:  { width: 44, height: 44, borderRadius: 12,
+                                 backgroundColor: Colors.surface,
+                                 alignItems: 'center', justifyContent: 'center',
+                                 borderWidth: 1, borderColor: Colors.border },
+  percorsoVehicleBannerTitle: { color: Colors.text, fontWeight: '700', fontSize: 13 },
+  percorsoVehicleBannerSub:   { color: Colors.muted, fontSize: 11, marginTop: 2 },
+  percorsoVehicleBannerPrice: { color: Colors.accent, fontWeight: '800', fontSize: 15 },
 });

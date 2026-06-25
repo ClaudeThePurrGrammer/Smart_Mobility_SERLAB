@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Smart Mobility · QR di test veicoli</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 32px 16px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0d0d1a;
+      color: #fff;
+      text-align: center;
+    }
+    h1 { font-size: 22px; margin: 0 0 6px; }
+    p.sub { color: #9ca3af; margin: 0 0 32px; font-size: 14px; }
+    .grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 24px;
+      justify-content: center;
+      align-items: flex-start;
+    }
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      padding: 18px;
+      width: 200px;
+      box-shadow: 0 6px 20px rgba(124, 58, 237, 0.25);
+    }
+    .qr { display: flex; justify-content: center; }
+    .qr canvas, .qr img { display: block; }
+    .label {
+      margin-top: 14px;
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: 3px;
+      color: #13132a;
+    }
+    .hint { color: #6b7280; font-size: 12px; margin-top: 4px; }
+    @media print {
+      body { background: #fff; color: #000; }
+      .card { box-shadow: none; border: 1px solid #ddd; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Smart Mobility · QR di test</h1>
+  <p class="sub">Inquadra uno di questi codici con la schermata "Scansiona" dell'app per sbloccare il veicolo.</p>
+
+  <div class="grid" id="grid"></div>
+
+  <script>
+    // Veicoli di test: il QR contiene "SM-<id>"; l'app estrae il numero (parseVehicleId).
+    var VEHICLES = ['SM-1', 'SM-2', 'SM-3', 'SM-5', 'SM-10'];
+    var grid = document.getElementById('grid');
+
+    VEHICLES.forEach(function (code) {
+      var card = document.createElement('div');
+      card.className = 'card';
+
+      var qrBox = document.createElement('div');
+      qrBox.className = 'qr';
+      card.appendChild(qrBox);
+
+      new QRCode(qrBox, {
+        text: code,
+        width: 164,
+        height: 164,
+        colorDark: '#13132a',
+        colorLight: '#ffffff',
+        correctLevel: QRCode.CorrectLevel.H,
+      });
+
+      var label = document.createElement('div');
+      label.className = 'label';
+      label.textContent = code;
+      card.appendChild(label);
+
+      var hint = document.createElement('div');
+      hint.className = 'hint';
+      hint.textContent = 'Veicolo #' + code.replace(/\D/g, '');
+      card.appendChild(hint);
+
+      grid.appendChild(card);
+    });
+  </script>
+</body>
+</html>

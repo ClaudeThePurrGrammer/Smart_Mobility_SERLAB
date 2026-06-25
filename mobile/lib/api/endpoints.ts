@@ -62,6 +62,9 @@ export const usersApi = {
   getPreferences: (token: string) => apiFetch<ApiPreferences>('/users/me/preferences', { token }),
   updatePreferences: (token: string, body: Partial<ApiPreferences>) =>
     apiFetch<ApiPreferences>('/users/me/preferences', { method: 'PATCH', body, token }),
+  // Aggiorna il proprio profilo (es. riscatto punti: { points: nuovoTotale }).
+  updateMe: (token: string, body: { points?: number; name?: string; surname?: string; phone?: string; notifications_enabled?: boolean }) =>
+    apiFetch<ApiUser>('/users/me', { method: 'PUT', body, token }),
 };
 
 // ─── Geo (geocoding / routing) ───────────────────────────────────────────────
@@ -95,6 +98,8 @@ export const paymentApi = {
 // ─── Promotions ──────────────────────────────────────────────────────────
 export const promotionsApi = {
   list: () => apiFetch<ApiPromotion[]>('/promotions'),
+  redeem: (token: string, code: string) =>
+    apiFetch<ApiPromotion>('/promotions/redeem', { method: 'POST', body: { code }, token }),
 };
 
 // ─── Messages ────────────────────────────────────────────────────────────

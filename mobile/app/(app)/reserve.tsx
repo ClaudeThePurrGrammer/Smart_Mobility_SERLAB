@@ -13,6 +13,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Colors, Gradients } from '@/constants/theme';
 import { useAuth } from '@/lib/auth/AuthContext';
+import { useRideSession } from '@/lib/ride/RideSessionContext';
 import { vehiclesApi, ridesApi, paymentApi, walletApi, geoApi } from '@/lib/api/endpoints';
 import { vehicleIcon, vehicleTypeLabel } from '@/lib/vehicles';
 import { haversineMeters, formatDistance } from '@/lib/geo';
@@ -43,6 +44,7 @@ interface Destination { label: string; lat: number; lng: number; }
 
 export default function ReserveScreen() {
   const { token, refreshUser } = useAuth();
+  const { startSession } = useRideSession();
   const { vehicleId, fromLat, fromLng } = useLocalSearchParams<{
     vehicleId?: string; fromLat?: string; fromLng?: string;
   }>();
@@ -178,10 +180,12 @@ export default function ReserveScreen() {
           to_addr: destination?.label ?? '',
         });
         await refreshUser?.();
+        startSession(ride);
         router.replace({
           pathname: '/(app)/active-ride',
           params: {
             rideId: String(ride.id),
+            vehicleId: String(vehicle.id),
             ...(userCoords ? { fromLat: String(userCoords.latitude), fromLng: String(userCoords.longitude) } : {}),
             ...(destination ? { toLat: String(destination.lat), toLng: String(destination.lng) } : {}),
           },

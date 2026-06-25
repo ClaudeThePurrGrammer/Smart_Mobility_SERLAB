@@ -6,6 +6,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { Colors, Gradients } from '@/constants/theme';
 import { useAuth } from '@/lib/auth/AuthContext';
+import { useRideSession } from '@/lib/ride/RideSessionContext';
 import { ridesApi } from '@/lib/api/endpoints';
 
 const { width } = Dimensions.get('window');
@@ -19,6 +20,7 @@ function parseVehicleId(raw: string): number | null {
 
 export default function ScanScreen() {
   const { token } = useAuth();
+  const { startSession } = useRideSession();
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [manualMode, setManualMode] = useState(false);
@@ -40,7 +42,8 @@ export default function ScanScreen() {
     setStarting(true);
     try {
       const ride = await ridesApi.start(token, { vehicle_id: vehicleId, from_addr: 'QR Scan' });
-      router.replace({ pathname: '/(app)/active-ride', params: { rideId: String(ride.id) } });
+      startSession(ride);
+      router.replace({ pathname: '/(app)/active-ride', params: { rideId: String(ride.id), vehicleId: String(vehicleId) } });
     } catch (e: any) {
       Alert.alert('Sblocco non riuscito', e?.message ?? 'Il mezzo non è disponibile.');
       setScanned(false);

@@ -1,10 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, TouchableOpacity, ScrollView, StyleSheet, Switch, Linking
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Colors, Gradients } from '@/constants/theme';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { authApi, ridesApi } from '@/lib/api/endpoints';
@@ -52,16 +52,19 @@ export default function ProfileScreen() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(user?.notifications_enabled ?? true);
   const [stats, setStats] = useState({ rides: 0, km: 0 });
 
-  // Statistiche reali (numero corse e km totali) dallo storico.
-  useEffect(() => {
-    if (!token) return;
-    ridesApi.history(token)
-      .then((rides) => setStats({
-        rides: rides.length,
-        km: Math.round(rides.reduce((s, r) => s + r.km, 0) * 10) / 10,
-      }))
-      .catch(() => {});
-  }, [token]);
+  // Statistiche reali: rifetch ad ogni focus del tab (il tab resta montato in memoria
+  // tra navigazioni, quindi useEffect([token]) non si riattiva dopo una nuova corsa).
+  useFocusEffect(
+    useCallback(() => {
+      if (!token) return;
+      ridesApi.history(token)
+        .then((rides) => setStats({
+          rides: rides.length,
+          km: Math.round(rides.reduce((s, r) => s + r.km, 0) * 10) / 10,
+        }))
+        .catch(() => {});
+    }, [token]),
+  );
 
   const toggleNotifications = async (value: boolean) => {
     setNotificationsEnabled(value);

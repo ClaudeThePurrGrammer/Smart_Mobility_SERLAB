@@ -2,6 +2,7 @@ import { Tabs } from 'expo-router';
 import { View } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '@/constants/theme';
+import { RideSessionProvider, useRideSession } from '@/lib/ride/RideSessionContext';
 
 function TabIcon({ name, color, focused }: { name: any; color: string; focused: boolean }) {
   return (
@@ -22,8 +23,32 @@ function TabIcon({ name, color, focused }: { name: any; color: string; focused: 
   );
 }
 
+function ActiveRideTabIcon({ color, focused }: { color: string; focused: boolean }) {
+  const { session, loading } = useRideSession();
+  const isActive = !loading && session !== null;
+  return (
+    <View style={{
+      alignItems: 'center', justifyContent: 'center',
+      width: 36, height: 36, borderRadius: 12,
+      backgroundColor: isActive
+        ? 'rgba(124,58,237,0.2)'
+        : focused ? 'rgba(79,142,247,0.12)' : 'transparent',
+    }}>
+      <Ionicons name="bicycle" size={24} color={isActive ? Colors.primary : color} />
+      {isActive && (
+        <View style={{
+          position: 'absolute', top: 4, right: 4,
+          width: 7, height: 7, borderRadius: 3.5,
+          backgroundColor: Colors.success,
+        }} />
+      )}
+    </View>
+  );
+}
+
 export default function AppLayout() {
   return (
+    <RideSessionProvider>
     <Tabs
       screenOptions={{
         headerShown: false,
@@ -54,7 +79,7 @@ export default function AppLayout() {
         options={{
           title: 'Corsa',
           tabBarIcon: ({ color, focused }) => (
-            <TabIcon name="bicycle" color={color} focused={focused} />
+            <ActiveRideTabIcon color={color} focused={focused} />
           ),
         }}
       />
@@ -113,8 +138,11 @@ export default function AppLayout() {
       <Tabs.Screen name="settings"     options={{ href: null }} />
       <Tabs.Screen name="report"       options={{ href: null }} />
       <Tabs.Screen name="support"      options={{ href: null }} />
-      <Tabs.Screen name="chat-support" options={{ href: null }} />
-      <Tabs.Screen name="ticket"       options={{ href: null }} />
+      <Tabs.Screen name="chat-support"    options={{ href: null }} />
+      <Tabs.Screen name="ticket"          options={{ href: null }} />
+      <Tabs.Screen name="vehicle-action"  options={{ href: null }} />
+      <Tabs.Screen name="activate"        options={{ href: null }} />
     </Tabs>
+    </RideSessionProvider>
   );
 }

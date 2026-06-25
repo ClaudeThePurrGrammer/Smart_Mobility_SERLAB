@@ -1,40 +1,85 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import MapView, { Polyline, Marker } from 'react-native-maps';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Colors } from '@/constants/theme';
 import { useAuth } from '@/lib/auth/AuthContext';
-import { ridesApi, geoApi } from '@/lib/api/endpoints';
-
-// Percorso/posizione di fallback (usati se mancano coords reali o il routing fallisce).
-const STATIC_ROUTE = [
-  { latitude: 41.1177, longitude: 16.8718 },
-  { latitude: 41.1185, longitude: 16.8725 },
-  { latitude: 41.1195, longitude: 16.8730 },
-  { latitude: 41.1200, longitude: 16.8740 },
-  { latitude: 41.1210, longitude: 16.8755 },
-];
+import { useRideSession } from '@/lib/ride/RideSessionContext';
+import { ridesApi, geoApi, vehiclesApi } from '@/lib/api/endpoints';
+import { vehicleIcon, vehicleTypeLabel } from '@/lib/vehicles';
+import type { VehicleType } from '@/components/ui/VehicleCard';
+import type { ApiVehicle, ApiRide } from '@/lib/api/types';
 
 
 export default function ActiveRideScreen() {
   const { token, refreshUser } = useAuth();
-  const params = useLocalSearchParams<{ rideId?: string; fromLat?: string; fromLng?: string; toLat?: string; toLng?: string; dest?: string; durMin?: string; km?: string; paused?: string }>();
-  const { rideId, fromLat, fromLng, toLat, toLng, dest } = params;
+  const { endSession } = useRideSession();
+  const params = useLocalSearchParams<{ rideId?: string; fromLat?: string; fromLng?: string; toLat?: string; toLng?: string; dest?: string; durMin?: string; km?: string; paused?: string; vehicleId?: string }>();
+  const { rideId, fromLat, fromLng, toLat, toLng, dest, vehicleId } = params;
   const destMin = params.durMin ? Number(params.durMin) : null;
   const destKm = params.km ? Number(params.km) : null;
   const [seconds, setSeconds] = useState(0);
   const [paused, setPaused] = useState(false);
   const [ending, setEnding] = useState(false);
-  const cost = ((seconds / 60) * 0.22).toFixed(2);
+
+  // Il tab screen rimane montato in memoria tra navigazioni (Expo Router Tabs).
+  // Quando arriva una NUOVA corsa (rideId diverso), reset degli stati di controllo.
+  // Gli stati di fetch (rideData, vehicle, routeCoords) vengono sovrascritti
+  // automaticamente dai rispettivi useEffect quando rideId cambia.
+  useEffect(() => {
+    setEnding(false);
+    setPaused(false);
+    setSeconds(0);
+  }, [rideId]);
+
+  // Corsa attiva dal backend: started_at reale, vehicle_id, status.
+  const [rideData, setRideData] = useState<ApiRide | null>(null);
+  useEffect(() => {
+    if (!token) return;
+    ridesApi.active(token)
+      .then((r) => { if (r) setRideData(r); })
+      .catch(() => {});
+  }, [token]);
+
+  // Timer inizializzato dal started_at reale del DB (resync a ogni ritorno sulla schermata).
+  useEffect(() => {
+    if (!rideData?.started_at) return;
+    const elapsed = Math.floor(
+      (Date.now() - new Date(rideData.started_at).getTime()) / 1000
+    );
+    setSeconds(Math.max(0, elapsed));
+  }, [rideData?.started_at]);
+
+  // Sincronizza lo stato di pausa locale con quello del DB al caricamento.
+  useEffect(() => {
+    if (rideData?.status === 'paused') setPaused(true);
+    else if (rideData?.status === 'active') setPaused(false);
+  }, [rideData?.status]);
+
+  // Veicolo reale della corsa (per icona, modello, batteria, tariffa).
+  const [vehicle, setVehicle] = useState<ApiVehicle | null>(null);
+  useEffect(() => {
+    // Priorità: vehicleId dai param; fallback a vehicle_id della corsa recuperata.
+    const id = vehicleId ?? rideData?.vehicle_id;
+    if (!id) return;
+    vehiclesApi.get(Number(id))
+      .then(setVehicle)
+      .catch(() => {});
+  }, [vehicleId, rideData?.vehicle_id]);
+
+  const pricePerMin = vehicle?.price_per_min ?? 0;
+  const cost = ((seconds / 60) * pricePerMin).toFixed(2);
+
+  const mapRef = useRef<MapView>(null);
 
   // Posizione di partenza reale dell'utente (passata dalla home), altrimenti fallback.
   const startCoords = (fromLat && fromLng)
     ? { latitude: Number(fromLat), longitude: Number(fromLng) }
-    : STATIC_ROUTE[0];
+    : { latitude: 41.1177, longitude: 16.8718 };
 
   // Percorso disegnato sulla mappa: calcolato via OSRM all'avvio.
-  const [routeCoords, setRouteCoords] = useState(STATIC_ROUTE);
+  const [routeCoords, setRouteCoords] = useState<{ latitude: number; longitude: number }[]>([]);
 
   useEffect(() => {
     let active = true;
@@ -57,9 +102,12 @@ export default function ActiveRideScreen() {
         const path = await geoApi.route(
           { lat: startCoords.latitude, lng: startCoords.longitude }, destCoords,
         );
-        if (active && path.length > 1) setRouteCoords(path);
+        if (active) {
+          if (path.length > 1) setRouteCoords(path);
+          else setRouteCoords([]); // empty fallback, no fake Bari coords
+        }
       } catch {
-        // mantiene il percorso statico di fallback
+        if (active) setRouteCoords([]);
       }
     })();
     return () => { active = false; };
@@ -83,16 +131,20 @@ export default function ActiveRideScreen() {
     if (ending) return;
     setEnding(true);
     const minutes = Math.max(1, Math.round(seconds / 60));
-    const km = Math.round(minutes * 0.2 * 10) / 10; // stima ~12 km/h urbani
+    const km = Math.round(minutes * 0.2 * 10) / 10;
     let result: Awaited<ReturnType<typeof ridesApi.end>> | null = null;
     try {
       if (token && rideId) {
         result = await ridesApi.end(token, Number(rideId), { km, minutes });
-        await refreshUser();
       }
     } catch {
+      // La corsa potrebbe essere già stata chiusa dal backend (cleanup orfani).
+      // Si prosegue comunque verso il riepilogo.
+    } finally {
+      // Pulizia locale SEMPRE garantita: il finally scatta sia su successo che su errore.
+      endSession();
+      await refreshUser().catch(() => {});
       setEnding(false);
-      // se l'end fallisce si prosegue comunque alla schermata di riepilogo
     }
     router.replace({
       pathname: '/(app)/end-ride',
@@ -101,10 +153,9 @@ export default function ActiveRideScreen() {
         minutes: String(result?.minutes ?? minutes),
         cost: (result?.cost ?? Number(cost)).toFixed(2),
         points: String(result?.points ?? minutes),
-        vehicleType: result?.vehicle_type ?? 'scooter',
-        // Posizione di rilascio = fine percorso: usata per ordinare/mostrare le aree di sosta.
-        endLat: String(routeCoords[routeCoords.length - 1].latitude),
-        endLng: String(routeCoords[routeCoords.length - 1].longitude),
+        vehicleType: result?.vehicle_type ?? vehicle?.type ?? 'scooter',
+        endLat: String((routeCoords[routeCoords.length - 1] ?? startCoords).latitude),
+        endLng: String((routeCoords[routeCoords.length - 1] ?? startCoords).longitude),
       },
     });
   };
@@ -138,6 +189,7 @@ export default function ActiveRideScreen() {
       </View>
 
       <MapView
+        ref={mapRef}
         style={StyleSheet.absoluteFillObject}
         initialRegion={{
           latitude: startCoords.latitude,
@@ -148,30 +200,39 @@ export default function ActiveRideScreen() {
         showsUserLocation
         showsCompass={false}
       >
-        <Polyline
-          coordinates={routeCoords}
-          strokeColor={Colors.accent}
-          strokeWidth={4}
-          lineDashPattern={undefined}
-        />
+        {routeCoords.length > 1 && (
+          <Polyline
+            coordinates={routeCoords}
+            strokeColor={Colors.accent}
+            strokeWidth={4}
+            lineDashPattern={undefined}
+          />
+        )}
         <Marker coordinate={startCoords}>
           <View style={styles.startMarker}>
             <Ionicons name="radio-button-on" size={24} color={Colors.primary} />
           </View>
         </Marker>
-        <Marker coordinate={routeCoords[routeCoords.length - 1]}>
-          <View style={styles.endMarker}>
-            <Ionicons name="location" size={24} color={Colors.success} />
-          </View>
-        </Marker>
+        {routeCoords.length > 0 && (
+          <Marker coordinate={routeCoords[routeCoords.length - 1]}>
+            <View style={styles.endMarker}>
+              <Ionicons name="location" size={24} color={Colors.success} />
+            </View>
+          </Marker>
+        )}
       </MapView>
 
       <View style={styles.mapActions}>
-        <TouchableOpacity style={styles.mapActionBtn}>
+        <TouchableOpacity style={styles.mapActionBtn} onPress={() => router.push('/(app)/report')}>
           <Ionicons name="warning-outline" size={18} color={Colors.warning} />
           <Text style={styles.mapActionText}>Segnala problema</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.mapActionBtn}>
+        <TouchableOpacity
+          style={styles.mapActionBtn}
+          onPress={() => mapRef.current?.animateToRegion(
+            { ...startCoords, latitudeDelta: 0.025, longitudeDelta: 0.025 }, 500
+          )}
+        >
           <Ionicons name="locate-outline" size={18} color={Colors.accent} />
           <Text style={styles.mapActionText}>Centra mappa</Text>
         </TouchableOpacity>
@@ -180,18 +241,39 @@ export default function ActiveRideScreen() {
       <View style={styles.bottomPanel}>
         <View style={styles.vehicleRow}>
           <View style={styles.vehicleIcon}>
-            <MaterialCommunityIcons name="scooter" size={28} color={Colors.accent} />
+            <MaterialCommunityIcons
+              name={(vehicleIcon[(vehicle?.type as VehicleType) ?? 'scooter']) as any}
+              size={28}
+              color={Colors.accent}
+            />
           </View>
           <View style={{ flex: 1, gap: 2 }}>
-            <Text style={styles.vehicleName}>Monopattino</Text>
-            <Text style={styles.vehicleModel}>Flash F2</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-              <Ionicons name="battery-half" size={14} color={Colors.success} />
-              <Text style={{ color: Colors.success, fontSize: 12, fontWeight: '600' }}>72%</Text>
-            </View>
+            <Text style={styles.vehicleName}>
+              {vehicle ? vehicleTypeLabel[vehicle.type] : '—'}
+            </Text>
+            <Text style={styles.vehicleModel}>
+              {vehicle?.model ?? '—'}
+            </Text>
+            {vehicle && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <Ionicons
+                  name="battery-half"
+                  size={14}
+                  color={vehicle.battery_pct > 50 ? Colors.success : Colors.warning}
+                />
+                <Text style={{
+                  color: vehicle.battery_pct > 50 ? Colors.success : Colors.warning,
+                  fontSize: 12, fontWeight: '600'
+                }}>
+                  {vehicle.battery_pct}%
+                </Text>
+              </View>
+            )}
           </View>
           <View style={{ alignItems: 'flex-end', gap: 2 }}>
-            <Text style={styles.rideId}>ID corsa: #1587</Text>
+            <Text style={styles.rideId}>
+              {rideId ? `ID corsa: #${rideId}` : ''}
+            </Text>
           </View>
         </View>
 

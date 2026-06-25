@@ -3,14 +3,31 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
+from fastapi import HTTPException
+
 from ..database import get_db
 from ..deps import get_current_user
 from ..models import User
-from ..schemas import PreferencesIn, PreferencesOut
+from ..schemas import PreferencesIn, PreferencesOut, UserOut, UserSelfUpdate
 
 router = APIRouter(prefix="/users", tags=["users"])
 
 DEFAULTS = PreferencesOut().model_dump()
+
+
+@router.put("/me", response_model=UserOut)
+def update_me(data: UserSelfUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    changes = data.model_dump(exclude_unset=True)
+    if "points" in changes and changes["points"] is not None:
+        if changes["points"] < 0:
+            raise HTTPException(400, "Punti insufficienti")
+        user.points = changes["points"]
+    for field in ("name", "surname", "phone", "notifications_enabled"):
+        if field in changes and changes[field] is not None:
+            setattr(user, field, changes[field])
+    db.commit()
+    db.refresh(user)
+    return user
 
 
 def _merged(prefs: dict | None) -> PreferencesOut:

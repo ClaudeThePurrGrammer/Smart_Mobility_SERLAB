@@ -55,6 +55,15 @@ class UserUpdate(BaseModel):
     notifications_enabled: bool | None = None
 
 
+class UserSelfUpdate(BaseModel):
+    """Aggiornamenti del proprio profilo dalla View mobile (es. riscatto punti)."""
+    points: int | None = None
+    name: str | None = None
+    surname: str | None = None
+    phone: str | None = None
+    notifications_enabled: bool | None = None
+
+
 # ─── Vehicles ───────────────────────────────────────────────────────────────
 class VehicleOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -163,6 +172,10 @@ class PromotionOut(BaseModel):
     expiry: str | None
     used: int
     total: int
+
+
+class PromotionRedeem(BaseModel):
+    code: str
 
 
 # ─── Messages ───────────────────────────────────────────────────────────────

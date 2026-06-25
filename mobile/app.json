@@ -1,0 +1,62 @@
+{
+  "expo": {
+    "name": "Smart Mobility",
+    "slug": "smart-mobility",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/logo.png",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "scheme": "smartmobility",
+    "splash": {
+      "image": "./assets/logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#08081A"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "it.uniba.serlab.smartmobility",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/logo.png",
+        "backgroundColor": "#08081A"
+      },
+      "package": "it.uniba.serlab.smartmobility",
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Consenti a Smart Mobility di accedere alla fotocamera per scansionare il QR code del mezzo."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Consenti a Smart Mobility di accedere alla tua posizione per mostrarti i mezzi disponibili nelle vicinanze e centrare la mappa su di te."
+        }
+      ],
+      "expo-web-browser",
+      "expo-secure-store"
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "8fe370f2-9c1d-42c6-883c-7892b64964d8"
+      }
+    }
+  }
+}

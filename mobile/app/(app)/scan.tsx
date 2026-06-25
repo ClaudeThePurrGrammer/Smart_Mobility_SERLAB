@@ -1,0 +1,188 @@
+import React, { useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Dimensions, TextInput, Alert } from 'react-native';
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { router } from 'expo-router';
+import { Colors, Gradients } from '@/constants/theme';
+import { useAuth } from '@/lib/auth/AuthContext';
+import { ridesApi } from '@/lib/api/endpoints';
+
+const { width } = Dimensions.get('window');
+const FRAME = width * 0.68;
+
+// Estrae l'ID numerico del mezzo dal contenuto del QR / codice (es. "SM-42" -> 42).
+function parseVehicleId(raw: string): number | null {
+  const match = raw.match(/\d+/);
+  return match ? Number(match[0]) : null;
+}
+
+export default function ScanScreen() {
+  const { token } = useAuth();
+  const [permission, requestPermission] = useCameraPermissions();
+  const [scanned, setScanned] = useState(false);
+  const [manualMode, setManualMode] = useState(false);
+  const [code, setCode] = useState('');
+  const [starting, setStarting] = useState(false);
+
+  // Avvia una corsa sul mezzo identificato dal codice e va alla schermata corsa attiva.
+  const startRideFromCode = async (raw: string) => {
+    const vehicleId = parseVehicleId(raw);
+    if (vehicleId == null) {
+      Alert.alert('Codice non valido', 'Il codice del veicolo non è leggibile. Riprova.');
+      setScanned(false);
+      return;
+    }
+    if (!token) {
+      Alert.alert('Sessione scaduta', 'Effettua di nuovo l\'accesso.');
+      return;
+    }
+    setStarting(true);
+    try {
+      const ride = await ridesApi.start(token, { vehicle_id: vehicleId, from_addr: 'QR Scan' });
+      router.replace({ pathname: '/(app)/active-ride', params: { rideId: String(ride.id) } });
+    } catch (e: any) {
+      Alert.alert('Sblocco non riuscito', e?.message ?? 'Il mezzo non è disponibile.');
+      setScanned(false);
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  const handleScanned = ({ data }: { data: string }) => {
+    if (scanned || starting) return;
+    setScanned(true);
+    startRideFromCode(data);
+  };
+
+  const handleManualSubmit = () => {
+    if (code.trim().length > 0 && !starting) {
+      startRideFromCode(code.trim());
+    }
+  };
+
+  if (!permission) return <View style={styles.container} />;
+
+  if (!permission.granted) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.permissionBox}>
+          <LinearGradient colors={Gradients.primary} style={styles.permIcon}>
+            <Ionicons name="camera-outline" size={32} color={Colors.text} />
+          </LinearGradient>
+          <Text style={styles.permTitle}>Accesso fotocamera</Text>
+          <Text style={styles.permSub}>
+            Per scansionare il QR code del veicolo è necessario il permesso alla fotocamera.
+          </Text>
+          <TouchableOpacity style={styles.permBtn} onPress={requestPermission}>
+            <LinearGradient colors={Gradients.primaryBtn} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.permBtnGradient}>
+              <Text style={styles.permBtnText}>Concedi permesso</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setManualMode(true)}>
+            <Text style={styles.manualLink}>Inserisci codice manualmente</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  if (manualMode) {
+    return (
+      <View style={styles.container}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => setManualMode(false)}>
+          <Ionicons name="arrow-back" size={24} color={Colors.text} />
+        </TouchableOpacity>
+        <View style={styles.manualBox}>
+          <MaterialCommunityIcons name="qrcode" size={48} color={Colors.accent} />
+          <Text style={styles.manualTitle}>Inserisci codice</Text>
+          <Text style={styles.manualSub}>Trovi il codice sul veicolo vicino al QR code</Text>
+          <TextInput
+            value={code}
+            onChangeText={setCode}
+            placeholder="es. SM-12345"
+            placeholderTextColor={Colors.muted}
+            autoCapitalize="characters"
+            style={styles.manualInput}
+          />
+          <TouchableOpacity style={styles.permBtn} onPress={handleManualSubmit} disabled={starting}>
+            <LinearGradient colors={Gradients.primaryBtn} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.permBtnGradient}>
+              <Text style={styles.permBtnText}>{starting ? 'Sblocco...' : 'Sblocca veicolo'}</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      <CameraView
+        style={StyleSheet.absoluteFillObject}
+        facing="back"
+        onBarcodeScanned={scanned ? undefined : handleScanned}
+        barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+      />
+
+      {/* Dark overlay with frame cutout */}
+      <View style={styles.overlay}>
+        <View style={styles.overlayTop} />
+        <View style={styles.overlayMiddle}>
+          <View style={styles.overlaySide} />
+          <View style={styles.frame}>
+            {/* Corner brackets */}
+            <View style={[styles.corner, styles.cornerTL]} />
+            <View style={[styles.corner, styles.cornerTR]} />
+            <View style={[styles.corner, styles.cornerBL]} />
+            <View style={[styles.corner, styles.cornerBR]} />
+          </View>
+          <View style={styles.overlaySide} />
+        </View>
+        <View style={styles.overlayBottom}>
+          <Text style={styles.scanHint}>Punta la fotocamera sul QR code del veicolo</Text>
+          <TouchableOpacity style={styles.manualBtn} onPress={() => setManualMode(true)}>
+            <Ionicons name="keypad-outline" size={18} color={Colors.accent} />
+            <Text style={styles.manualBtnText}>Inserisci codice manuale</Text>
+          </TouchableOpacity>
+          {scanned && (
+            <TouchableOpacity style={styles.resetBtn} onPress={() => setScanned(false)}>
+              <Text style={{ color: Colors.text, fontWeight: '600' }}>Scansiona di nuovo</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container:       { flex: 1, backgroundColor: Colors.bg },
+  backBtn:         { position: 'absolute', top: 52, left: 16, zIndex: 10, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 12, padding: 8 },
+  overlay:         { flex: 1 },
+  overlayTop:      { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)' },
+  overlayMiddle:   { flexDirection: 'row', height: FRAME },
+  overlaySide:     { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)' },
+  frame:           { width: FRAME, height: FRAME },
+  corner:          { position: 'absolute', width: 28, height: 28, borderColor: Colors.accent, borderWidth: 3 },
+  cornerTL:        { top: 0, left: 0, borderBottomWidth: 0, borderRightWidth: 0, borderTopLeftRadius: 8 },
+  cornerTR:        { top: 0, right: 0, borderBottomWidth: 0, borderLeftWidth: 0, borderTopRightRadius: 8 },
+  cornerBL:        { bottom: 0, left: 0, borderTopWidth: 0, borderRightWidth: 0, borderBottomLeftRadius: 8 },
+  cornerBR:        { bottom: 0, right: 0, borderTopWidth: 0, borderLeftWidth: 0, borderBottomRightRadius: 8 },
+  overlayBottom:   { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', alignItems: 'center', justifyContent: 'center', gap: 16, paddingHorizontal: 24 },
+  scanHint:        { color: Colors.text, fontSize: 15, textAlign: 'center', fontWeight: '500' },
+  manualBtn:       { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(167,139,250,0.15)', borderWidth: 1, borderColor: Colors.accent, borderRadius: 14, paddingHorizontal: 18, paddingVertical: 10 },
+  manualBtnText:   { color: Colors.accent, fontSize: 14, fontWeight: '600' },
+  resetBtn:        { backgroundColor: Colors.primary, borderRadius: 14, paddingHorizontal: 20, paddingVertical: 10 },
+  permissionBox:   { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, gap: 16 },
+  permIcon:        { width: 72, height: 72, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  permTitle:       { color: Colors.text, fontSize: 22, fontWeight: '800' },
+  permSub:         { color: Colors.muted, fontSize: 14, textAlign: 'center', lineHeight: 20 },
+  permBtn:         { borderRadius: 14, overflow: 'hidden', alignSelf: 'stretch' },
+  permBtnGradient: { paddingVertical: 15, alignItems: 'center' },
+  permBtnText:     { color: Colors.text, fontWeight: '700', fontSize: 16 },
+  manualLink:      { color: Colors.accent, fontSize: 14, fontWeight: '500' },
+  manualBox:       { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, gap: 14, marginTop: 80 },
+  manualTitle:     { color: Colors.text, fontSize: 22, fontWeight: '800' },
+  manualSub:       { color: Colors.muted, fontSize: 14, textAlign: 'center' },
+  manualInput:     { alignSelf: 'stretch', backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border, borderRadius: 14, paddingHorizontal: 16, height: 54, color: Colors.text, fontSize: 18, fontWeight: '700', textAlign: 'center', letterSpacing: 3 },
+});

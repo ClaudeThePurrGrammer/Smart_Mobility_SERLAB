@@ -1,0 +1,73 @@
+version: '3.9'
+
+services:
+
+  # ─── Metro Bundler (React Native / Expo) ───────────────────────────────────
+  mobile:
+    build:
+      context: ./mobile
+    container_name: smart_mobility_metro
+    ports:
+      - "8081:8081"    # Metro bundler — Expo Go si connette qui
+      - "19000:19000"  # Expo DevTools
+      - "19001:19001"
+    environment:
+      - REACT_NATIVE_PACKAGER_HOSTNAME=${HOST_IP:-localhost}
+    volumes:
+      - ./mobile:/app
+      - mobile_deps:/app/node_modules
+    restart: unless-stopped
+
+  # ─── Backend API (FastAPI) — CONTROLLER ────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+    container_name: smart_mobility_api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://smartmobility:secret@db:5432/smartmobility
+      - JWT_SECRET=${JWT_SECRET:-changeme}
+      # Credenziali OAuth opzionali: se valorizzate, i token social vengono verificati davvero.
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - FACEBOOK_APP_ID=${FACEBOOK_APP_ID:-}
+      - FACEBOOK_APP_SECRET=${FACEBOOK_APP_SECRET:-}
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  # ─── Web Dashboard (React + Vite) — VIEW Operatore/Amministrazione ─────────
+  dashboard:
+    build:
+      context: ./dashboard
+    container_name: smart_mobility_dashboard
+    ports:
+      - "5173:5173"    # Vite dev server (hot-reload)
+    environment:
+      # Il proxy Vite (/api, /ws) inoltra al CONTROLLER usando il nome di servizio.
+      - API_TARGET=http://backend:8000
+    volumes:
+      - ./dashboard:/app
+      - dashboard_deps:/app/node_modules
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # ─── Database PostgreSQL ───────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: smart_mobility_db
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=smartmobility
+      - POSTGRES_PASSWORD=secret
+      - POSTGRES_DB=smartmobility
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  mobile_deps:
+  dashboard_deps:
+  postgres_data:

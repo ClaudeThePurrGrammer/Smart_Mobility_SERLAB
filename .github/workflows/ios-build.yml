@@ -1,0 +1,133 @@
+name: iOS Build
+
+on:
+  workflow_dispatch:          # avvio manuale dal sito GitHub
+  push:
+    branches: [main]
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/ios-build.yml'
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    steps:
+      # ── 1. Checkout ────────────────────────────────────────────────────────
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # ── 2. Node + dipendenze ───────────────────────────────────────────────
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install JS dependencies
+        working-directory: mobile
+        run: npm ci
+
+      # ── 3. Expo prebuild → genera la cartella ios/ nativa ─────────────────
+      - name: Expo prebuild
+        working-directory: mobile
+        run: npx expo prebuild --platform ios --clean
+        env:
+          EXPO_NO_DOTENV: 1
+
+      # ── 4. CocoaPods ──────────────────────────────────────────────────────
+      - name: Install CocoaPods
+        working-directory: mobile/ios
+        run: pod install
+
+      # ── 5. Certificati e provisioning profile via fastlane ────────────────
+      - name: Install fastlane
+        run: gem install fastlane --no-document
+
+      - name: Fetch certificate & provisioning profile
+        working-directory: mobile/ios
+        env:
+          FASTLANE_USER: ${{ secrets.APPLE_ID }}
+          FASTLANE_APPLE_APPLICATION_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          FASTLANE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          fastlane cert --development \
+            --username "$FASTLANE_USER" \
+            --team_id "$FASTLANE_TEAM_ID" \
+            --output_path "$RUNNER_TEMP/certs"
+
+          fastlane sigh --development \
+            --app_identifier "it.uniba.serlab.smartmobility" \
+            --username "$FASTLANE_USER" \
+            --team_id "$FASTLANE_TEAM_ID" \
+            --output_path "$RUNNER_TEMP/profiles"
+
+      # ── 6. Importa certificato nel keychain del runner ────────────────────
+      - name: Import certificate to keychain
+        run: |
+          P12=$(ls $RUNNER_TEMP/certs/*.p12 | head -1)
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASS="temp_keychain_pass"
+
+          security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          security import "$P12" -P "" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+
+      # ── 7. Installa provisioning profile ──────────────────────────────────
+      - name: Install provisioning profile
+        run: |
+          PROFILE=$(ls $RUNNER_TEMP/profiles/*.mobileprovision | head -1)
+          UUID=$(security cms -D -i "$PROFILE" | plutil -extract UUID raw -)
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp "$PROFILE" ~/Library/MobileDevice/Provisioning\ Profiles/"$UUID".mobileprovision
+          echo "Provisioning profile UUID: $UUID"
+
+      # ── 8. Build & Archive ─────────────────────────────────────────────────
+      - name: Build archive
+        working-directory: mobile/ios
+        run: |
+          WORKSPACE=$(ls *.xcworkspace | head -1)
+          xcodebuild archive \
+            -workspace "$WORKSPACE" \
+            -scheme "SmartMobility" \
+            -configuration Release \
+            -archivePath "$RUNNER_TEMP/SmartMobility.xcarchive" \
+            -destination "generic/platform=iOS" \
+            CODE_SIGN_STYLE=Automatic \
+            DEVELOPMENT_TEAM=${{ secrets.APPLE_TEAM_ID }} \
+            | xcpretty --color || true
+
+      # ── 9. Export IPA ──────────────────────────────────────────────────────
+      - name: Export IPA
+        run: |
+          cat > $RUNNER_TEMP/ExportOptions.plist << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>development</string>
+            <key>teamID</key>
+            <string>${{ secrets.APPLE_TEAM_ID }}</string>
+            <key>compileBitcode</key>
+            <false/>
+          </dict>
+          </plist>
+          EOF
+
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/SmartMobility.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/ipa"
+
+      # ── 10. Upload IPA come artifact scaricabile ───────────────────────────
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartMobility-${{ github.run_number }}
+          path: ${{ runner.temp }}/ipa/*.ipa
+          retention-days: 30

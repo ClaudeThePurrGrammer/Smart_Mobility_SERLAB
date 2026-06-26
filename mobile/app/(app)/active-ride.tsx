@@ -22,6 +22,10 @@ export default function ActiveRideScreen() {
   const [paused, setPaused] = useState(false);
   const [ending, setEnding] = useState(false);
 
+  const PAUSE_MAX_SEC = 600;
+  const [pauseSecondsRemaining, setPauseSecondsRemaining] = useState(PAUSE_MAX_SEC);
+  const pauseSecondsRef = useRef(PAUSE_MAX_SEC);
+
   // Il tab screen rimane montato in memoria tra navigazioni (Expo Router Tabs).
   // Quando arriva una NUOVA corsa (rideId diverso), reset degli stati di controllo.
   // Gli stati di fetch (rideData, vehicle, routeCoords) vengono sovrascritti
@@ -30,6 +34,8 @@ export default function ActiveRideScreen() {
     setEnding(false);
     setPaused(false);
     setSeconds(0);
+    setPauseSecondsRemaining(PAUSE_MAX_SEC);
+    pauseSecondsRef.current = PAUSE_MAX_SEC;
   }, [rideId]);
 
   // Blocca il back hardware (Android): durante la corsa l'unica uscita consentita
@@ -49,12 +55,23 @@ export default function ActiveRideScreen() {
   }, [token]);
 
   // Timer inizializzato dal started_at reale del DB (resync a ogni ritorno sulla schermata).
+  // Calcola anche il residuo di pausa dal backend per ripristinare il countdown corretto.
   useEffect(() => {
     if (!rideData?.started_at) return;
     const elapsed = Math.floor(
       (Date.now() - new Date(rideData.started_at).getTime()) / 1000
     );
     setSeconds(Math.max(0, elapsed));
+    const accumulati = rideData.pausa_secondi_accumulati ?? 0;
+    let residuo = Math.max(0, PAUSE_MAX_SEC - accumulati);
+    if (rideData.status === 'paused' && rideData.orario_inizio_pausa) {
+      const elapsedCurrentPause = Math.floor(
+        (Date.now() - new Date(rideData.orario_inizio_pausa).getTime()) / 1000
+      );
+      residuo = Math.max(0, residuo - elapsedCurrentPause);
+    }
+    setPauseSecondsRemaining(residuo);
+    pauseSecondsRef.current = residuo;
   }, [rideData?.started_at]);
 
   // Sincronizza lo stato di pausa locale con quello del DB al caricamento.
@@ -123,9 +140,10 @@ export default function ActiveRideScreen() {
   const togglePauseTo = async (next: boolean) => {
     if (next === paused) return;
     setPaused(next); // ottimistico (il timer dei costi si ferma subito)
-    if (token && rideId) {
+    const effectivePauseRideId = rideId ?? String(rideData?.id);
+    if (token && effectivePauseRideId) {
       try {
-        const updated = await ridesApi.pause(token, Number(rideId));
+        const updated = await ridesApi.pause(token, Number(effectivePauseRideId));
         setPaused(updated.status === 'paused');
       } catch {
         setPaused(!next); // rollback in caso di errore
@@ -140,8 +158,11 @@ export default function ActiveRideScreen() {
     const km = Math.round(minutes * 0.2 * 10) / 10;
     let result: Awaited<ReturnType<typeof ridesApi.end>> | null = null;
     try {
-      if (token && rideId) {
-        result = await ridesApi.end(token, Number(rideId), { km, minutes });
+      // Usa rideId dai params; come fallback usa rideData.id fetchato dal backend
+      // (necessario se il guard redirect ha navagato senza params).
+      const effectiveRideId = rideId ?? String(rideData?.id);
+      if (token && effectiveRideId) {
+        result = await ridesApi.end(token, Number(effectiveRideId), { km, minutes });
       }
     } catch {
       // La corsa potrebbe essere già stata chiusa dal backend (cleanup orfani).
@@ -172,7 +193,29 @@ export default function ActiveRideScreen() {
     return () => clearInterval(t);
   }, [paused]);
 
+  // Countdown pausa: parte quando paused=true, si ferma al resume.
+  // Il ref evita stale closure su pauseSecondsRemaining dentro setInterval.
+  useEffect(() => {
+    if (!paused) return;
+    if (pauseSecondsRef.current <= 0) {
+      handleEndRide();
+      return;
+    }
+    const t = setInterval(() => {
+      pauseSecondsRef.current -= 1;
+      setPauseSecondsRemaining(pauseSecondsRef.current);
+      if (pauseSecondsRef.current <= 0) {
+        clearInterval(t);
+        handleEndRide();
+      }
+    }, 1000);
+    return () => clearInterval(t);
+  }, [paused]);
+
   const fmt = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  const fmtCountdown = fmt(pauseSecondsRemaining);
+  const countdownUrgent = pauseSecondsRemaining <= 60;
+  const countdownCritical = pauseSecondsRemaining <= 30;
 
   return (
     <View style={styles.container}>
@@ -296,6 +339,29 @@ export default function ActiveRideScreen() {
           </View>
         </View>
 
+        {paused && (
+          <View style={[
+            styles.pauseBanner,
+            countdownUrgent && styles.pauseBannerUrgent,
+            countdownCritical && styles.pauseBannerCritical,
+          ]}>
+            <Ionicons
+              name="timer-outline"
+              size={16}
+              color={countdownCritical ? Colors.danger : countdownUrgent ? Colors.warning : Colors.accent}
+            />
+            <Text style={[
+              styles.pauseBannerText,
+              countdownCritical && { color: Colors.danger },
+              countdownUrgent && !countdownCritical && { color: Colors.warning },
+            ]}>
+              Pausa automatica in{' '}
+              <Text style={{ fontWeight: '800' }}>{fmtCountdown}</Text>
+              {' '}— la corsa verrà terminata allo scadere
+            </Text>
+          </View>
+        )}
+
         <View style={styles.controls}>
           <TouchableOpacity
             style={[styles.ctrlBtn, paused ? styles.ctrlBtnActive : null]}
@@ -356,4 +422,8 @@ const styles = StyleSheet.create({
   ctrlLabel: { color: Colors.muted, fontSize: 11, fontWeight: '500', textAlign: 'center' },
   startMarker: { padding: 4 },
   endMarker: { padding: 4 },
+  pauseBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(124,58,237,0.12)', borderWidth: 1, borderColor: 'rgba(124,58,237,0.3)', borderRadius: 14, padding: 12 },
+  pauseBannerUrgent: { backgroundColor: 'rgba(234,179,8,0.1)', borderColor: 'rgba(234,179,8,0.4)' },
+  pauseBannerCritical: { backgroundColor: 'rgba(239,68,68,0.1)', borderColor: 'rgba(239,68,68,0.4)' },
+  pauseBannerText: { color: Colors.accent, fontSize: 13, flex: 1, lineHeight: 18 },
 });

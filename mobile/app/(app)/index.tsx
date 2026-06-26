@@ -16,6 +16,7 @@ import { vehiclesApi, geoApi } from '@/lib/api/endpoints';
 import type { ApiGeocodeResult } from '@/lib/api/types';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { useRideSession } from '@/lib/ride/RideSessionContext';
+import { useReservationSession } from '@/lib/reservation/ReservationSessionContext';
 import { useSearch } from '@/lib/search/SearchContext';
 import VehicleDetailSheet from '@/components/map/VehicleDetailSheet';
 import ManualLocationModal from '@/components/map/ManualLocationModal';
@@ -80,6 +81,15 @@ export default function HomeScreen() {
 
   // ── Sessione corsa esplicita: banner solo se l'utente ha avviato una corsa ──
   const { session } = useRideSession();
+  const { reservation, clearReservation } = useReservationSession();
+
+  // Aggiorna il countdown della prenotazione ogni secondo.
+  const [, forceUpdateRes] = useState(0);
+  useEffect(() => {
+    if (!reservation) return;
+    const t = setInterval(() => forceUpdateRes(n => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [reservation]);
   const [, forceUpdate] = useState(0);
   useEffect(() => {
     if (!session) return;
@@ -424,6 +434,55 @@ export default function HomeScreen() {
         </TouchableOpacity>
       )}
 
+      {/* Banner prenotazione attiva — visibile solo in assenza di corsa */}
+      {reservation && !session && (() => {
+        const resSecondsLeft = Math.max(
+          0,
+          Math.floor((new Date(reservation.ora_scadenza).getTime() - Date.now()) / 1000),
+        );
+
+        // Scadenza già passata: puliamo lo stato e nascondiamo il banner.
+        // setTimeout(0) evita la mutazione di stato durante il render.
+        if (resSecondsLeft <= 0) {
+          setTimeout(() => clearReservation(), 0);
+          return null;
+        }
+
+        const resMm = String(Math.floor(resSecondsLeft / 60)).padStart(2, '0');
+        const resSs = String(resSecondsLeft % 60).padStart(2, '0');
+        return (
+          <TouchableOpacity
+            style={styles.reservationBanner}
+            onPress={() =>
+              router.push({
+                pathname: '/(app)/active-reservation',
+                params: {
+                  reservationId: String(reservation.id),
+                  vehicleId: String(reservation.id_mezzo),
+                  vehicleType: reservation.mezzo?.tipo ?? 'scooter',
+                  vehicleName: reservation.mezzo?.nome ?? '',
+                  vehicleModel: reservation.mezzo?.modello ?? '',
+                  batteryPct: String(reservation.mezzo?.livello_carica ?? 100),
+                  oraScadenza: reservation.ora_scadenza,
+                },
+              })
+            }
+            activeOpacity={0.85}
+          >
+            <LinearGradient
+              colors={['rgba(124,58,237,0.9)', 'rgba(79,142,247,0.9)']}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+              style={styles.activeBannerInner}
+            >
+              <Ionicons name="bookmark" size={15} color={Colors.text} />
+              <Text style={styles.activeBannerText}>Prenotazione attiva</Text>
+              <Text style={styles.activeBannerSub}>{resMm}:{resSs}</Text>
+              <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.7)" />
+            </LinearGradient>
+          </TouchableOpacity>
+        );
+      })()}
+
       {/* Bottom sheet — nascosto quando è aperto il pannello di dettaglio mezzo */}
       <Animated.View
         style={[
@@ -625,6 +684,7 @@ const styles = StyleSheet.create({
   drawerItemText:    { color: Colors.text, fontSize: 16, fontWeight: '500', flex: 1 },
 
   activeBanner:      { position: 'absolute', bottom: 8, left: 12, right: 12, zIndex: 11, borderRadius: 18, overflow: 'hidden' },
+  reservationBanner: { position: 'absolute', bottom: 8, left: 12, right: 12, zIndex: 12, borderRadius: 18, overflow: 'hidden' },
   activeBannerInner: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 13 },
   activeBannerDot:   { width: 8, height: 8, borderRadius: 4, backgroundColor: Colors.success },
   activeBannerText:  { color: Colors.text, fontWeight: '700', fontSize: 15, flex: 1 },

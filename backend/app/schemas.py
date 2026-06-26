@@ -120,6 +120,8 @@ class RideOut(BaseModel):
     status: str
     started_at: datetime
     ended_at: datetime | None
+    orario_inizio_pausa: datetime | None = None
+    pausa_secondi_accumulati: int = 0
 
 
 # ─── Wallet ─────────────────────────────────────────────────────────────────

@@ -1,14 +1,20 @@
 import { useEffect } from 'react';
-import { Tabs, router, usePathname } from 'expo-router';
+import { Tabs, router, usePathname, useRootNavigationState } from 'expo-router';
 import { View } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '@/constants/theme';
 import { RideSessionProvider, useRideSession } from '@/lib/ride/RideSessionContext';
+import { ReservationSessionProvider } from '@/lib/reservation/ReservationSessionContext';
 import { SearchProvider } from '@/lib/search/SearchContext';
 
 // Schermate raggiungibili durante una corsa attiva: il flusso di uscita
 // consentito è solo active-ride → end-ride. Tutto il resto è bloccato.
-const RIDE_LOCKED_ALLOWED = ['/active-ride', '/end-ride'];
+// NOTA: '/active-reservation' è incluso per evitare la race condition in cui
+// startSession(ride) viene committato da React prima che router.replace verso
+// active-ride completi la navigazione: senza questo, il guard ridirigerebbe a
+// active-ride senza i params (rideId = undefined) → handleEndRide non chiude
+// la corsa → corsa "stuck" sul backend → loop al prossimo caricamento.
+const RIDE_LOCKED_ALLOWED = ['/active-ride', '/end-ride', '/active-reservation'];
 
 function TabIcon({ name, color, focused }: { name: any; color: string; focused: boolean }) {
   return (
@@ -56,9 +62,11 @@ export default function AppLayout() {
   // I provider devono stare SOPRA <AppTabs> così da poter leggere session.
   return (
     <RideSessionProvider>
-      <SearchProvider>
-        <AppTabs />
-      </SearchProvider>
+      <ReservationSessionProvider>
+        <SearchProvider>
+          <AppTabs />
+        </SearchProvider>
+      </ReservationSessionProvider>
     </RideSessionProvider>
   );
 }
@@ -66,15 +74,21 @@ export default function AppLayout() {
 function AppTabs() {
   const { session } = useRideSession();
   const pathname = usePathname();
+  const navState = useRootNavigationState();
+  // navState?.key è truthy già al primo mount (root container pronto), ma il
+  // Tabs non ha ancora eseguito i propri effect interni per registrare i suoi
+  // screen. Verifichiamo che 'active-ride' compaia nei routeNames del child
+  // state annidato prima di emettere qualsiasi azione imperativa.
+  const tabsReady = navState?.routes?.some(
+    (r: any) => r.state?.routeNames?.includes('active-ride')
+  ) ?? false;
 
-  // Corsa attiva ⇒ tab bloccate. Se l'utente raggiunge una qualsiasi schermata
-  // non consentita (back gesture, deep link), viene riportato su active-ride.
-  // Il blocco si basa solo su session (RideSessionContext): nessun flag locale.
   useEffect(() => {
+    if (!tabsReady) return;
     if (session && !RIDE_LOCKED_ALLOWED.includes(pathname)) {
       router.replace('/(app)/active-ride');
     }
-  }, [session, pathname]);
+  }, [session, pathname, tabsReady]);
 
   return (
     <Tabs
@@ -171,8 +185,9 @@ function AppTabs() {
       <Tabs.Screen name="support"      options={{ href: null }} />
       <Tabs.Screen name="chat-support"    options={{ href: null }} />
       <Tabs.Screen name="ticket"          options={{ href: null }} />
-      <Tabs.Screen name="vehicle-action"  options={{ href: null }} />
-      <Tabs.Screen name="activate"        options={{ href: null }} />
+      <Tabs.Screen name="vehicle-action"      options={{ href: null }} />
+      <Tabs.Screen name="activate"            options={{ href: null }} />
+      <Tabs.Screen name="active-reservation"  options={{ href: null }} />
     </Tabs>
   );
 }

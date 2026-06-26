@@ -14,7 +14,8 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Colors, Gradients } from '@/constants/theme';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { useRideSession } from '@/lib/ride/RideSessionContext';
-import { vehiclesApi, ridesApi, paymentApi, walletApi, geoApi } from '@/lib/api/endpoints';
+import { useReservationSession } from '@/lib/reservation/ReservationSessionContext';
+import { vehiclesApi, ridesApi, reservationsApi, paymentApi, walletApi, geoApi } from '@/lib/api/endpoints';
 import { vehicleIcon, vehicleTypeLabel } from '@/lib/vehicles';
 import { haversineMeters, formatDistance } from '@/lib/geo';
 import type { ApiVehicle, ApiPaymentMethod, ApiRoutePoint, ApiGeocodeResult } from '@/lib/api/types';
@@ -45,6 +46,7 @@ interface Destination { label: string; lat: number; lng: number; }
 export default function ReserveScreen() {
   const { token, refreshUser } = useAuth();
   const { startSession } = useRideSession();
+  const { startReservation } = useReservationSession();
   const { vehicleId, fromLat, fromLng, toAddr, toLat, toLng } = useLocalSearchParams<{
     vehicleId?: string; fromLat?: string; fromLng?: string;
     toAddr?: string; toLat?: string; toLng?: string;
@@ -198,7 +200,7 @@ export default function ReserveScreen() {
     setResults([]);
   };
 
-  const handleConfirm = async () => {
+  const handleStartRide = async () => {
     if (!vehicle || confirming) return;
     setConfirming(true);
     try {
@@ -207,8 +209,6 @@ export default function ReserveScreen() {
           vehicle_id: vehicle.id,
           vehicle_type: vehicle.type,
           from_addr: 'Posizione attuale',
-          // Destinazione opzionale: inviata solo se impostata. Se assente, il
-          // campo è omesso (il backend usa il default "") evitando un 422.
           ...(destination ? { to_addr: destination.label } : {}),
         });
         await refreshUser?.();
@@ -227,7 +227,31 @@ export default function ReserveScreen() {
       router.replace('/(app)/active-ride');
     } catch {
       setConfirming(false);
-      router.replace('/(app)/active-ride');
+    }
+  };
+
+  const handleReserve = async () => {
+    if (!vehicle || confirming || !token) return;
+    setConfirming(true);
+    try {
+      const res = await reservationsApi.create(token, vehicle.id);
+      startReservation(res);
+      router.replace({
+        pathname: '/(app)/active-reservation',
+        params: {
+          reservationId: String(res.id),
+          vehicleId: String(vehicle.id),
+          vehicleType: vehicle.type,
+          vehicleName: vehicle.name,
+          vehicleModel: vehicle.model,
+          batteryPct: String(vehicle.battery_pct),
+          oraScadenza: res.ora_scadenza,
+          ...(userCoords ? { fromLat: String(userCoords.latitude), fromLng: String(userCoords.longitude) } : {}),
+          ...(destination ? { toAddr: destination.label, toLat: String(destination.lat), toLng: String(destination.lng) } : {}),
+        },
+      });
+    } catch {
+      setConfirming(false);
     }
   };
 
@@ -396,20 +420,22 @@ export default function ReserveScreen() {
             </View>
           </ScrollView>
 
-          {/* CTA conferma */}
+          {/* CTA */}
           <View style={styles.footer}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.footerLabel}>Totale stimato</Text>
-              <Text style={styles.footerValue}>€ {estCost.toFixed(2)}</Text>
-            </View>
-            <TouchableOpacity style={styles.confirmBtn} onPress={handleConfirm} disabled={confirming} activeOpacity={0.85}>
-              <LinearGradient colors={Gradients.primaryBtn} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.confirmGradient}>
+            <TouchableOpacity style={styles.reserveBtn} onPress={handleReserve} disabled={confirming} activeOpacity={0.85}>
+              <LinearGradient colors={['#7C3AED', '#4F8EF7']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.btnGradient}>
                 {confirming
                   ? <ActivityIndicator color={Colors.text} />
                   : <>
-                      <Ionicons name="checkmark-circle" size={20} color={Colors.text} />
-                      <Text style={styles.confirmText}>Conferma e avvia</Text>
+                      <Ionicons name="bookmark-outline" size={18} color={Colors.text} />
+                      <Text style={styles.btnText}>Prenota</Text>
                     </>}
+              </LinearGradient>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.startBtn} onPress={handleStartRide} disabled={confirming} activeOpacity={0.85}>
+              <LinearGradient colors={['#10b981', '#059669']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.btnGradient}>
+                <Ionicons name="flash" size={18} color={Colors.text} />
+                <Text style={styles.btnText}>Avvia subito</Text>
               </LinearGradient>
             </TouchableOpacity>
           </View>
@@ -521,12 +547,11 @@ const styles = StyleSheet.create({
   payLabel:         { color: Colors.text, fontSize: 15, fontWeight: '600' },
   paySub:           { color: Colors.muted, fontSize: 12, marginTop: 2 },
 
-  footer:           { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 28, borderTopWidth: 1, borderTopColor: Colors.border, backgroundColor: Colors.card },
-  footerLabel:      { color: Colors.muted, fontSize: 12 },
-  footerValue:      { color: Colors.text, fontSize: 22, fontWeight: '900' },
-  confirmBtn:       { flex: 1.4, borderRadius: 16, overflow: 'hidden' },
-  confirmGradient:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 16 },
-  confirmText:      { color: Colors.text, fontSize: 16, fontWeight: '700' },
+  footer:      { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 28, borderTopWidth: 1, borderTopColor: Colors.border, backgroundColor: Colors.card },
+  reserveBtn:  { flex: 1.4, borderRadius: 16, overflow: 'hidden' },
+  startBtn:    { flex: 1, borderRadius: 16, overflow: 'hidden' },
+  btnGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 16 },
+  btnText:     { color: Colors.text, fontSize: 15, fontWeight: '700' },
 
   // Modale destinazione
   modalWrap:        { zIndex: 50, backgroundColor: 'rgba(0,0,0,0.6)' },

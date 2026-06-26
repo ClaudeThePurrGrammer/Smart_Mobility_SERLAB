@@ -56,6 +56,8 @@ export interface ApiRide {
   status: string;
   started_at: string;
   ended_at: string | null;
+  orario_inizio_pausa: string | null;
+  pausa_secondi_accumulati: number;
 }
 
 export interface ApiTransaction {
@@ -116,6 +118,24 @@ export interface ApiPreferences {
   notif_system: boolean;
   location_bg: boolean;
   biometric: boolean;
+}
+
+export interface ApiReservationVehicle {
+  id: number;
+  nome: string;
+  modello: string;
+  tipo: string;
+  livello_carica: number;
+  posizione_gps: { lat: number; lng: number };
+}
+
+export interface ApiReservation {
+  id: number;
+  id_mezzo: number;
+  ora_creazione: string;
+  ora_scadenza: string;
+  stato: string;
+  mezzo: ApiReservationVehicle | null;
 }
 
 export interface ApiGeocodeResult {

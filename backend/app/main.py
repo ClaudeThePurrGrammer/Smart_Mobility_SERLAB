@@ -8,7 +8,7 @@ from sqlalchemy import text
 from .database import Base, SessionLocal, engine, wait_for_db
 from .routers import (
     amministrazione, auth, geo, messages, operatore, parking, payment, promotions,
-    realtime, reports, restrizioni, rides, segnalazioni, users, vehicles, wallet,
+    realtime, reports, reservations, restrizioni, rides, segnalazioni, users, vehicles, wallet,
 )
 from .seed import cleanup_orphans, seed
 
@@ -23,6 +23,8 @@ def _ensure_schema() -> None:
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'UTENTE'",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS account_status VARCHAR(20) DEFAULT 'ATTIVO'",
         "ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS locked BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE rides ADD COLUMN IF NOT EXISTS orario_inizio_pausa TIMESTAMP WITH TIME ZONE",
+        "ALTER TABLE rides ADD COLUMN IF NOT EXISTS pausa_secondi_accumulati INTEGER NOT NULL DEFAULT 0",
     ]
     with engine.begin() as conn:
         for stmt in stmts:
@@ -68,6 +70,7 @@ app.include_router(restrizioni.router)
 app.include_router(operatore.router)
 app.include_router(amministrazione.router)
 app.include_router(realtime.router)
+app.include_router(reservations.router)
 
 
 @app.get("/health", tags=["health"])

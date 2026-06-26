@@ -72,13 +72,22 @@ def start_ride(data: RideCreate, user: User = Depends(get_current_user), db: Ses
 
 @router.patch("/{ride_id}/pause", response_model=RideOut)
 def toggle_pause(ride_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Alterna lo stato della corsa tra 'active' e 'paused'."""
+    """Alterna lo stato della corsa tra 'active' e 'paused', accumulando i secondi di pausa."""
     ride = db.get(Ride, ride_id)
     if not ride or ride.user_id != user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Corsa non trovata")
     if ride.status not in ("active", "paused"):
         raise HTTPException(status.HTTP_409_CONFLICT, "La corsa non è in corso")
-    ride.status = "paused" if ride.status == "active" else "active"
+    now = datetime.now(timezone.utc)
+    if ride.status == "active":
+        ride.status = "paused"
+        ride.orario_inizio_pausa = now
+    else:
+        if ride.orario_inizio_pausa:
+            elapsed = int((now - ride.orario_inizio_pausa).total_seconds())
+            ride.pausa_secondi_accumulati = (ride.pausa_secondi_accumulati or 0) + elapsed
+        ride.orario_inizio_pausa = None
+        ride.status = "active"
     db.commit()
     db.refresh(ride)
     return ride

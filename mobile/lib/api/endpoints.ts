@@ -3,7 +3,7 @@
 import { apiFetch } from './client';
 import type {
   ApiGeocodeResult, ApiMessage, ApiParkingArea, ApiPaymentMethod, ApiPreferences, ApiPromotion,
-  ApiReport, ApiRide, ApiRouteOption, ApiRoutePoint, ApiUser, ApiVehicle, ApiWallet, TokenResponse,
+  ApiReport, ApiReservation, ApiRide, ApiRouteOption, ApiRoutePoint, ApiUser, ApiVehicle, ApiWallet, TokenResponse,
 } from './types';
 
 // ─── Auth ────────────────────────────────────────────────────────────────
@@ -109,6 +109,15 @@ export const messagesApi = {
     apiFetch<ApiMessage>('/messages', { method: 'POST', body, token }),
   markAllRead: (token: string) => apiFetch<ApiMessage[]>('/messages/read-all', { method: 'POST', token }),
   markRead: (token: string, id: number) => apiFetch<ApiMessage>(`/messages/${id}/read`, { method: 'POST', token }),
+};
+
+// ─── Prenotazioni ────────────────────────────────────────────────────────
+export const reservationsApi = {
+  getActive: (token: string) => apiFetch<ApiReservation | null>('/prenotazioni/attiva', { token }),
+  create: (token: string, vehicleId: number) =>
+    apiFetch<ApiReservation>('/prenotazioni', { method: 'POST', body: { id_mezzo: vehicleId }, token }),
+  cancel: (token: string, reservationId: number) =>
+    apiFetch<void>(`/prenotazioni/${reservationId}`, { method: 'DELETE', token }),
 };
 
 // ─── Reports ─────────────────────────────────────────────────────────────

@@ -131,11 +131,24 @@ class Ride(Base):
     minutes: Mapped[int] = mapped_column(Integer, default=0)
     cost: Mapped[float] = mapped_column(Float, default=0.0)
     points: Mapped[int] = mapped_column(Integer, default=0)
-    status: Mapped[str] = mapped_column(String(20), default="completed")  # active | completed
+    status: Mapped[str] = mapped_column(String(20), default="completed")  # active | paused | completed
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    orario_inizio_pausa: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    pausa_secondi_accumulati: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     user = relationship("User", back_populates="rides")
+
+
+class Reservation(Base):
+    __tablename__ = "reservations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    vehicle_id: Mapped[int] = mapped_column(ForeignKey("vehicles.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(20), default="active")  # active | cancelled | used
 
 
 class WalletTransaction(Base):

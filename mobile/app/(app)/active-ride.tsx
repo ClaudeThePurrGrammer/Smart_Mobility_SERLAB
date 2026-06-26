@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, BackHandler } from 'react-native';
 import MapView, { Polyline, Marker } from 'react-native-maps';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { StatusBar } from 'expo-status-bar';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Colors } from '@/constants/theme';
 import { useAuth } from '@/lib/auth/AuthContext';
-import { useRideSession } from '@/lib/ride/RideSessionContext';
 import { ridesApi, geoApi, vehiclesApi } from '@/lib/api/endpoints';
 import { vehicleIcon, vehicleTypeLabel } from '@/lib/vehicles';
 import type { VehicleType } from '@/components/ui/VehicleCard';
@@ -14,7 +14,6 @@ import type { ApiVehicle, ApiRide } from '@/lib/api/types';
 
 export default function ActiveRideScreen() {
   const { token, refreshUser } = useAuth();
-  const { endSession } = useRideSession();
   const params = useLocalSearchParams<{ rideId?: string; fromLat?: string; fromLng?: string; toLat?: string; toLng?: string; dest?: string; durMin?: string; km?: string; paused?: string; vehicleId?: string }>();
   const { rideId, fromLat, fromLng, toLat, toLng, dest, vehicleId } = params;
   const destMin = params.durMin ? Number(params.durMin) : null;
@@ -32,6 +31,13 @@ export default function ActiveRideScreen() {
     setPaused(false);
     setSeconds(0);
   }, [rideId]);
+
+  // Blocca il back hardware (Android): durante la corsa l'unica uscita consentita
+  // è "Termina corsa" → end-ride. Ritornando true il back di sistema è ignorato.
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => true);
+    return () => sub.remove();
+  }, []);
 
   // Corsa attiva dal backend: started_at reale, vehicle_id, status.
   const [rideData, setRideData] = useState<ApiRide | null>(null);
@@ -141,8 +147,8 @@ export default function ActiveRideScreen() {
       // La corsa potrebbe essere già stata chiusa dal backend (cleanup orfani).
       // Si prosegue comunque verso il riepilogo.
     } finally {
-      // Pulizia locale SEMPRE garantita: il finally scatta sia su successo che su errore.
-      endSession();
+      // NB: la sessione NON viene chiusa qui. Resta attiva (tab bloccate) fino
+      // alla conferma del parcheggio in end-ride, che chiama endSession().
       await refreshUser().catch(() => {});
       setEnding(false);
     }
@@ -170,6 +176,8 @@ export default function ActiveRideScreen() {
 
   return (
     <View style={styles.container}>
+      {/* Schermo pieno durante la corsa: la status bar è nascosta. */}
+      <StatusBar hidden />
       <View style={styles.topBar}>
         <View style={styles.topStat}>
           <Ionicons name="time-outline" size={14} color={Colors.muted} />
@@ -222,11 +230,9 @@ export default function ActiveRideScreen() {
         )}
       </MapView>
 
+      {/* Durante la corsa nessun pulsante naviga fuori da questa schermata:
+          resta solo "Centra mappa" (azione locale, non naviga). */}
       <View style={styles.mapActions}>
-        <TouchableOpacity style={styles.mapActionBtn} onPress={() => router.push('/(app)/report')}>
-          <Ionicons name="warning-outline" size={18} color={Colors.warning} />
-          <Text style={styles.mapActionText}>Segnala problema</Text>
-        </TouchableOpacity>
         <TouchableOpacity
           style={styles.mapActionBtn}
           onPress={() => mapRef.current?.animateToRegion(

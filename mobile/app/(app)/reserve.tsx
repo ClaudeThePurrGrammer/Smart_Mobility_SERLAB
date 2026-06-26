@@ -3,14 +3,14 @@
 // Flusso: scelta destinazione → calcolo percorso (OSRM) → stima tempo/costo →
 // conferma → avvio corsa sul Controller → schermata "corsa attiva".
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator,
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Colors, Gradients } from '@/constants/theme';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { useRideSession } from '@/lib/ride/RideSessionContext';
@@ -45,9 +45,17 @@ interface Destination { label: string; lat: number; lng: number; }
 export default function ReserveScreen() {
   const { token, refreshUser } = useAuth();
   const { startSession } = useRideSession();
-  const { vehicleId, fromLat, fromLng } = useLocalSearchParams<{
+  const { vehicleId, fromLat, fromLng, toAddr, toLat, toLng } = useLocalSearchParams<{
     vehicleId?: string; fromLat?: string; fromLng?: string;
+    toAddr?: string; toLat?: string; toLng?: string;
   }>();
+
+  // Destinazione ricevuta via params (dalla ricerca della Home, attraverso
+  // vehicle-action). Opzionale: se assente la prenotazione parte senza meta.
+  const paramDestination: Destination | null =
+    (toAddr && toLat && toLng)
+      ? { label: toAddr, lat: Number(toLat), lng: Number(toLng) }
+      : null;
 
   const [vehicle, setVehicle] = useState<ApiVehicle | null>(null);
   const [payment, setPayment] = useState<ApiPaymentMethod | null>(null);
@@ -55,8 +63,8 @@ export default function ReserveScreen() {
   const [loading, setLoading] = useState(true);
   const [confirming, setConfirming] = useState(false);
 
-  // Destinazione + percorso calcolato
-  const [destination, setDestination] = useState<Destination | null>(null);
+  // Destinazione + percorso calcolato (pre-popolata dai params se presenti)
+  const [destination, setDestination] = useState<Destination | null>(paramDestination);
   const [route, setRoute] = useState<ApiRoutePoint[]>([]);
   const [routeKm, setRouteKm] = useState<number | null>(null);
   const [routeMin, setRouteMin] = useState<number | null>(null);
@@ -71,6 +79,28 @@ export default function ReserveScreen() {
   const userCoords = (fromLat && fromLng)
     ? { latitude: Number(fromLat), longitude: Number(fromLng) }
     : null;
+
+  // La schermata tab resta montata in memoria: la destinazione NON deve
+  // persistere tra sessioni. A ogni focus (anche al ritorno da altre schermate)
+  // riportiamo gli stati della meta alla destinazione corrente dei params:
+  // così una meta scelta nella Home viene mostrata, ma nessuna meta "vecchia"
+  // di una sessione precedente sopravvive. NON tocchiamo il veicolo (dai params)
+  // né la posizione di partenza (GPS reale).
+  useFocusEffect(
+    useCallback(() => {
+      setDestination(
+        (toAddr && toLat && toLng)
+          ? { label: toAddr, lat: Number(toLat), lng: Number(toLng) }
+          : null,
+      );
+      setRoute([]);
+      setRouteKm(null);
+      setRouteMin(null);
+      setDestModal(false);
+      setQuery('');
+      setResults([]);
+    }, [toAddr, toLat, toLng]),
+  );
 
   // ── Carica veicolo, metodo di pagamento e saldo ──────────────────────────
   useEffect(() => {
@@ -177,7 +207,9 @@ export default function ReserveScreen() {
           vehicle_id: vehicle.id,
           vehicle_type: vehicle.type,
           from_addr: 'Posizione attuale',
-          to_addr: destination?.label ?? '',
+          // Destinazione opzionale: inviata solo se impostata. Se assente, il
+          // campo è omesso (il backend usa il default "") evitando un 422.
+          ...(destination ? { to_addr: destination.label } : {}),
         });
         await refreshUser?.();
         startSession(ride);
@@ -254,6 +286,9 @@ export default function ReserveScreen() {
                 </View>
                 <Ionicons name="chevron-forward" size={18} color={Colors.muted} />
               </View>
+              <Text style={styles.destOptionalHint}>
+                Opzionale — puoi impostare la meta anche durante la corsa
+              </Text>
             </TouchableOpacity>
 
             {/* Mappa con percorso */}
@@ -458,6 +493,7 @@ const styles = StyleSheet.create({
   destIcon:         { width: 40, height: 40, borderRadius: 10, backgroundColor: Colors.surface, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: Colors.border },
   destLabel:        { color: Colors.muted, fontSize: 12 },
   destValue:        { color: Colors.text, fontSize: 15, fontWeight: '600', marginTop: 2 },
+  destOptionalHint: { color: Colors.muted, fontSize: 12, lineHeight: 16 },
 
   mapCard:          { height: 180, borderRadius: 18, overflow: 'hidden', borderWidth: 1, borderColor: Colors.border },
   map:              { ...StyleSheet.absoluteFillObject },

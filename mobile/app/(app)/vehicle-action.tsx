@@ -28,8 +28,11 @@ export default function VehicleActionScreen() {
     vehicleId?: string;
     fromLat?: string;
     fromLng?: string;
+    toAddr?: string;
+    toLat?: string;
+    toLng?: string;
   }>();
-  const { vehicleId, fromLat, fromLng } = params;
+  const { vehicleId, fromLat, fromLng, toAddr, toLat, toLng } = params;
 
   const { token } = useAuth();
   const { startSession } = useRideSession();
@@ -159,6 +162,8 @@ export default function VehicleActionScreen() {
               params: {
                 vehicleId: vehicleId ?? '',
                 ...(fromLat && fromLng ? { fromLat, fromLng } : {}),
+                // Ripassa invariata la destinazione ricevuta dalla Home (se presente).
+                ...(toAddr && toLat && toLng ? { toAddr, toLat, toLng } : {}),
               },
             })
           }

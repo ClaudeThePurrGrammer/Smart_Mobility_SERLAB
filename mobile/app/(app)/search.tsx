@@ -14,6 +14,7 @@ import { vehiclesApi, ridesApi, geoApi } from '@/lib/api/endpoints';
 import type { ApiVehicle, ApiRouteOption } from '@/lib/api/types';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { useRideSession } from '@/lib/ride/RideSessionContext';
+import { useSearch } from '@/lib/search/SearchContext';
 import { useDeviceLocation } from '@/lib/useDeviceLocation';
 import { haversineMeters, walkMinutes } from '@/lib/geo';
 
@@ -35,6 +36,10 @@ type BatteryFilter  = 'tutti' | '50' | '70';
 type DistanceFilter = 'tutti' | '200' | '500';
 
 const MAX_VEHICLES = 60;
+
+// Raggio massimo (km) entro cui mostrare i mezzi disponibili nella lista "Mezzi disponibili".
+// Configurabile: cambiare qui per ampliare/restringere l'area di ricerca.
+const DEFAULT_SEARCH_RADIUS_KM = 2;
 
 /**
  * Calcola il "mezzo idoneo" per la destinazione scelta.
@@ -100,26 +105,38 @@ export default function SearchScreen() {
   const params = useLocalSearchParams<{ q?: string; destLat?: string; destLng?: string }>();
   const { token } = useAuth();
   const { startSession } = useRideSession();
-  const { coords } = useDeviceLocation();
+  const { coords, status: locationStatus } = useDeviceLocation();
+  // Query e destinazione condivise con la Home via SearchContext.
+  const { query, setQuery, destination: ctxDestination, setDestination: setCtxDestination, clearDestination } = useSearch();
 
   const origin = coords ?? DEFAULT_CENTER;
 
-  // ── Destinazione (con coordinate reali) ────────────────────────────────────
-  const [destination, setDestination] = useState<Destination | null>(
-    params.q && params.destLat && params.destLng
-      ? { label: params.q, lat: Number(params.destLat), lng: Number(params.destLng) }
+  // ── Destinazione (con coordinate reali) — derivata dal context condiviso ────
+  const destination: Destination | null = useMemo(
+    () => (ctxDestination && ctxDestination.lat != null && ctxDestination.lng != null)
+      ? { label: ctxDestination.addr, lat: ctxDestination.lat, lng: ctxDestination.lng }
       : null,
+    [ctxDestination],
   );
-  const [displayText, setDisplayText] = useState(params.q ?? '');
 
-  // Se arriva solo il testo (q) senza coordinate, geocodifica per ottenere il punto.
+  // Compatibilità deep-link: se la schermata riceve q/destLat/destLng via params
+  // e il context è vuoto, lo inizializziamo (una sola volta, al mount).
   useEffect(() => {
-    if (destination || !params.q) return;
-    let active = true;
-    geoApi.geocode(params.q).then((res) => {
-      if (active && res[0]) setDestination({ label: params.q!, lat: res[0].lat, lng: res[0].lng });
-    }).catch(() => {});
-    return () => { active = false; };
+    if (ctxDestination || !params.q) return;
+    if (params.destLat && params.destLng) {
+      setCtxDestination({ addr: params.q, lat: Number(params.destLat), lng: Number(params.destLng) });
+      setQuery(params.q);
+    } else {
+      // Solo testo: geocodifica per ottenere il punto.
+      let active = true;
+      geoApi.geocode(params.q).then((res) => {
+        if (active && res[0]) {
+          setCtxDestination({ addr: params.q!, lat: res[0].lat, lng: res[0].lng });
+          setQuery(params.q!);
+        }
+      }).catch(() => {});
+      return () => { active = false; };
+    }
   }, []);
 
   // ── Mezzi dal Controller ───────────────────────────────────────────────────
@@ -158,27 +175,34 @@ export default function SearchScreen() {
   const optimalFor = (type: string): ApiRouteOption | null => routesByType[type]?.[0] ?? null;
 
   // ── Costruzione card mezzi con dati reali calcolati ────────────────────────
+  // Mostra SOLO i mezzi realmente disponibili (status === 'available') ed entro
+  // DEFAULT_SEARCH_RADIUS_KM dalla posizione GPS reale. Senza GPS: nessun mezzo.
   const allVehicles: Vehicle[] = useMemo(() => {
-    return rawVehicles.map((v, idx) => {
-      const distanceToM = Math.round(haversineMeters(origin, { latitude: v.lat, longitude: v.lng }));
-      const opt = optimalFor(v.type);
-      const tripKm = opt ? Math.round((opt.distance_m / 1000) * 10) / 10 : 0;
-      const estMinutes = opt ? opt.duration_min : 0;
-      const estimatedEur = Math.round((v.unlock_fee + v.price_per_min * estMinutes) * 100) / 100;
-      return {
-        id: String(v.id),
-        name: v.name,
-        model: v.model,
-        type: v.type,
-        batteryPct: v.battery_pct,
-        distanceToM,
-        walkMinutes: walkMinutes(distanceToM),
-        tripKm,
-        estimatedEur,
-        recommended: idx === 0,
-      };
-    });
-  }, [rawVehicles, routesByType, origin.latitude, origin.longitude]);
+    if (!coords) return [];
+    const radiusM = DEFAULT_SEARCH_RADIUS_KM * 1000;
+    return rawVehicles
+      .filter((v) => v.status === 'available')
+      .map((v) => ({ v, distanceToM: Math.round(haversineMeters(coords, { latitude: v.lat, longitude: v.lng })) }))
+      .filter(({ distanceToM }) => distanceToM <= radiusM)
+      .map(({ v, distanceToM }, idx) => {
+        const opt = optimalFor(v.type);
+        const tripKm = opt ? Math.round((opt.distance_m / 1000) * 10) / 10 : 0;
+        const estMinutes = opt ? opt.duration_min : 0;
+        const estimatedEur = Math.round((v.unlock_fee + v.price_per_min * estMinutes) * 100) / 100;
+        return {
+          id: String(v.id),
+          name: v.name,
+          model: v.model,
+          type: v.type,
+          batteryPct: v.battery_pct,
+          distanceToM,
+          walkMinutes: walkMinutes(distanceToM),
+          tripKm,
+          estimatedEur,
+          recommended: idx === 0,
+        };
+      });
+  }, [rawVehicles, routesByType, coords]);
 
   const [selected, setSelected]   = useState<Vehicle | null>(null);
 
@@ -243,29 +267,30 @@ export default function SearchScreen() {
   };
 
   // ── Search modal (geocoding reale) ─────────────────────────────────────────
+  // L'input della modale è legato alla query condivisa (context): digitando qui
+  // si aggiorna anche la barra della Home in tempo reale.
   const [searchModalOpen, setSearchModalOpen] = useState(false);
-  const [modalQuery, setModalQuery] = useState('');
   const [geoResults, setGeoResults] = useState<{ label: string; lat: number; lng: number }[]>([]);
   const [geoLoading, setGeoLoading] = useState(false);
   const modalY = useRef(new Animated.Value(-700)).current;
   const modalOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    if (modalQuery.trim().length < 2) { setGeoResults([]); return; }
+    // Geocodifica solo a modale aperta (la query è condivisa via context).
+    if (!searchModalOpen || query.trim().length < 2) { setGeoResults([]); return; }
     let active = true;
     setGeoLoading(true);
     const t = setTimeout(async () => {
       try {
-        const res = await geoApi.geocode(modalQuery.trim());
+        const res = await geoApi.geocode(query.trim());
         if (active) setGeoResults(res);
       } catch { if (active) setGeoResults([]); }
       finally { if (active) setGeoLoading(false); }
     }, 450);
     return () => { active = false; clearTimeout(t); };
-  }, [modalQuery]);
+  }, [query, searchModalOpen]);
 
   const openSearchModal = () => {
-    setModalQuery('');
     setSearchModalOpen(true);
     modalY.setValue(-700); modalOpacity.setValue(0);
     Animated.parallel([
@@ -274,7 +299,7 @@ export default function SearchScreen() {
     ]).start();
   };
   const closeSearchModal = (dest?: Destination) => {
-    if (dest) { setDestination(dest); setDisplayText(dest.label); }
+    if (dest) { setCtxDestination({ addr: dest.label, lat: dest.lat, lng: dest.lng }); setQuery(dest.label); }
     Animated.parallel([
       Animated.timing(modalY, { toValue: -700, duration: 240, easing: Easing.in(Easing.cubic), useNativeDriver: true }),
       Animated.timing(modalOpacity, { toValue: 0, duration: 200, useNativeDriver: true }),
@@ -342,12 +367,12 @@ export default function SearchScreen() {
           <Ionicons name="arrow-back" size={22} color={Colors.text} />
         </TouchableOpacity>
         <TouchableOpacity style={styles.searchBarBtn} onPress={openSearchModal} activeOpacity={0.8}>
-          <Ionicons name="search-outline" size={16} color={Colors.muted} />
-          <Text style={[styles.searchBarBtnText, displayText ? { color: Colors.text } : {}]} numberOfLines={1}>
-            {displayText || 'Dove si va?'}
+          <Ionicons name="search-outline" size={16} color={query ? Colors.accent : Colors.muted} />
+          <Text style={[styles.searchBarBtnText, query ? { color: Colors.text } : {}]} numberOfLines={1}>
+            {query || 'Dove si va?'}
           </Text>
-          {displayText.length > 0 && (
-            <TouchableOpacity onPress={() => { setDisplayText(''); setDestination(null); }} activeOpacity={0.7}>
+          {query.length > 0 && (
+            <TouchableOpacity onPress={() => { setQuery(''); clearDestination(); }} activeOpacity={0.7}>
               <Ionicons name="close-circle" size={16} color={Colors.muted} />
             </TouchableOpacity>
           )}
@@ -469,28 +494,49 @@ export default function SearchScreen() {
           </>
         )}
 
-        {/* Lista mezzi */}
+        {/* Lista mezzi — solo mezzi disponibili entro il raggio dalla posizione reale */}
         <View style={styles.vehicleSection}>
           <View style={styles.vehicleSectionHeader}>
             <Text style={styles.vehicleSectionTitle}>Mezzi disponibili</Text>
-            <View style={styles.vehicleCountBadge}><Text style={styles.vehicleCountText}>{filteredVehicles.length}</Text></View>
+            {coords && (
+              <View style={styles.vehicleCountBadge}><Text style={styles.vehicleCountText}>{filteredVehicles.length}</Text></View>
+            )}
           </View>
-          {filteredVehicles.length === 0 ? (
+
+          {!coords ? (
+            (locationStatus === 'loading' || locationStatus === 'idle') ? (
+              <View style={styles.emptyState}>
+                <ActivityIndicator color={Colors.accent} />
+                <Text style={styles.emptyText}>Localizzazione in corso…</Text>
+              </View>
+            ) : (
+              // SA-02a: permessi GPS negati o posizione non disponibile.
+              <View style={styles.emptyState}>
+                <Ionicons name="location-outline" size={40} color={Colors.muted} />
+                <Text style={styles.emptyText}>Attiva la posizione per vedere i mezzi vicini</Text>
+              </View>
+            )
+          ) : filteredVehicles.length === 0 ? (
             <View style={styles.emptyState}>
               <Ionicons name="bicycle-outline" size={40} color={Colors.muted} />
-              <Text style={styles.emptyText}>Nessun mezzo trovato</Text>
+              <Text style={styles.emptyText}>Nessun mezzo disponibile entro {DEFAULT_SEARCH_RADIUS_KM} km</Text>
             </View>
           ) : (
-            <View style={{ paddingHorizontal: 16 }}>
-              {filteredVehicles.map((v, idx) => {
-                const anim = cardAnims[idx];
-                return (
-                  <Animated.View key={v.id} style={anim ? { opacity: anim.opacity, transform: [{ translateY: anim.translateY }] } : undefined}>
-                    <VehicleCard vehicle={v} selected={selected?.id === v.id} onPress={setSelected} />
-                  </Animated.View>
-                );
-              })}
-            </View>
+            <>
+              <Text style={styles.vehicleCountLine}>
+                {filteredVehicles.length} {filteredVehicles.length === 1 ? 'mezzo disponibile' : 'mezzi disponibili'} entro {DEFAULT_SEARCH_RADIUS_KM} km
+              </Text>
+              <View style={{ paddingHorizontal: 16 }}>
+                {filteredVehicles.map((v, idx) => {
+                  const anim = cardAnims[idx];
+                  return (
+                    <Animated.View key={v.id} style={anim ? { opacity: anim.opacity, transform: [{ translateY: anim.translateY }] } : undefined}>
+                      <VehicleCard vehicle={v} selected={selected?.id === v.id} onPress={setSelected} />
+                    </Animated.View>
+                  );
+                })}
+              </View>
+            </>
           )}
         </View>
       </ScrollView>
@@ -532,8 +578,8 @@ export default function SearchScreen() {
                 style={styles.searchModalInput}
                 placeholder="Cerca destinazione"
                 placeholderTextColor={Colors.muted}
-                value={modalQuery}
-                onChangeText={setModalQuery}
+                value={query}
+                onChangeText={setQuery}
                 autoFocus autoCorrect={false} returnKeyType="search"
               />
               <TouchableOpacity onPress={() => closeSearchModal()} style={styles.searchModalCloseBtn} activeOpacity={0.7}>
@@ -563,7 +609,7 @@ export default function SearchScreen() {
               ) : (
                 <View style={{ alignItems: 'center', paddingVertical: 28, gap: 8 }}>
                   <Ionicons name="search-outline" size={34} color={Colors.muted} />
-                  <Text style={{ color: Colors.muted, fontSize: 14 }}>{modalQuery.length < 2 ? 'Digita per cercare' : 'Nessun risultato'}</Text>
+                  <Text style={{ color: Colors.muted, fontSize: 14 }}>{query.length < 2 ? 'Digita per cercare' : 'Nessun risultato'}</Text>
                 </View>
               )}
             </View>
@@ -951,6 +997,7 @@ const styles = StyleSheet.create({
   vehicleSectionTitle: { color: Colors.text, fontWeight: '700', fontSize: 16, flex: 1 },
   vehicleCountBadge:   { backgroundColor: Colors.surface, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2 },
   vehicleCountText:    { color: Colors.muted, fontSize: 12, fontWeight: '600' },
+  vehicleCountLine:    { color: Colors.muted, fontSize: 13, paddingHorizontal: 16, marginBottom: 4 },
   emptyState:          { alignItems: 'center', gap: 8, paddingVertical: 40, marginHorizontal: 16 },
   emptyText:           { color: Colors.text, fontWeight: '600', fontSize: 15 },
 

@@ -16,6 +16,7 @@ import { vehiclesApi, geoApi } from '@/lib/api/endpoints';
 import type { ApiGeocodeResult } from '@/lib/api/types';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { useRideSession } from '@/lib/ride/RideSessionContext';
+import { useSearch } from '@/lib/search/SearchContext';
 import VehicleDetailSheet from '@/components/map/VehicleDetailSheet';
 import ManualLocationModal from '@/components/map/ManualLocationModal';
 
@@ -64,7 +65,9 @@ function usePressAnim() {
 export default function HomeScreen() {
   const [drawerVisible,    setDrawerVisible]    = useState(false);
   const [searchModalOpen,  setSearchModalOpen]  = useState(false);
-  const [searchQuery,      setSearchQuery]      = useState('');
+  // Query e destinazione condivise con la tab Corsa via SearchContext: la
+  // sorgente di verità è il context, così le due barre restano sincronizzate.
+  const { query, setQuery, destination, setDestination, clearDestination } = useSearch();
 
   // ── Task 2: geolocalizzazione dispositivo ──────────────────────────────────
   const mapRef = useRef<MapView>(null);
@@ -145,9 +148,15 @@ export default function HomeScreen() {
       params: {
         vehicleId: String(v.id),
         ...(coords ? { fromLat: String(coords.latitude), fromLng: String(coords.longitude) } : {}),
+        // Propaga la destinazione condivisa (se valorizzata con coordinate).
+        ...(destination && destination.lat != null && destination.lng != null ? {
+          toAddr: destination.addr,
+          toLat: String(destination.lat),
+          toLng: String(destination.lng),
+        } : {}),
       },
     });
-  }, [coords]);
+  }, [coords, destination]);
 
   const drawerX        = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
   const overlayOpacity = useRef(new Animated.Value(0)).current;
@@ -207,8 +216,9 @@ export default function HomeScreen() {
   const drawerNav = (path: any) => { closeDrawer(); setTimeout(() => router.push(path), 220); };
 
   // ── Search modal ───────────────────────────────────────────────────────────
+  // La query NON viene azzerata all'apertura/chiusura: è condivisa col context
+  // e deve restare sincronizzata con la barra della tab Corsa.
   const openSearchModal = useCallback(() => {
-    setSearchQuery('');
     setSearchModalOpen(true);
     modalY.setValue(-700);
     modalOpacity.setValue(0);
@@ -222,22 +232,33 @@ export default function HomeScreen() {
     Animated.parallel([
       Animated.timing(modalY,       { toValue: -700, duration: 240, easing: Easing.in(Easing.cubic), useNativeDriver: true }),
       Animated.timing(modalOpacity, { toValue: 0,    duration: 200, useNativeDriver: true }),
-    ]).start(() => {
-      setSearchModalOpen(false);
-      setSearchQuery('');
-    });
+    ]).start(() => setSearchModalOpen(false));
   }, []);
+
+  // Conferma esplicita di una destinazione dalla ricerca Home: aggiorna il
+  // context condiviso (destinazione + query), chiude la modale e reindirizza
+  // alla tab Corsa (push, così il back riporta alla Home senza perdere la
+  // ricerca). La barra di Corsa è già precompilata perché legge dal context.
+  const selectHomeDestination = useCallback((r: ApiGeocodeResult) => {
+    const short = r.label.split(',').slice(0, 2).join(',');
+    setDestination({ addr: short, lat: r.lat, lng: r.lng });
+    setQuery(short);
+    closeSearchModal();
+    router.push('/(app)/search');
+  }, [closeSearchModal, setDestination, setQuery]);
 
   // Ricerca indirizzi reale via geocoding (OpenStreetMap), con debounce.
   const [geoResults, setGeoResults] = useState<ApiGeocodeResult[]>([]);
   const [geoLoading, setGeoLoading] = useState(false);
   useEffect(() => {
-    if (searchQuery.trim().length < 2) { setGeoResults([]); return; }
+    // Geocodifica solo a modale aperta: evita chiamate in background quando la
+    // query cambia da un'altra tab (la query è condivisa via context).
+    if (!searchModalOpen || query.trim().length < 2) { setGeoResults([]); return; }
     let active = true;
     setGeoLoading(true);
     const t = setTimeout(async () => {
       try {
-        const res = await geoApi.geocode(searchQuery.trim());
+        const res = await geoApi.geocode(query.trim());
         if (active) setGeoResults(res);
       } catch {
         if (active) setGeoResults([]);
@@ -246,7 +267,7 @@ export default function HomeScreen() {
       }
     }, 450);
     return () => { active = false; clearTimeout(t); };
-  }, [searchQuery]);
+  }, [query, searchModalOpen]);
 
   // Distanza utente→risultato (se disponibile la posizione GPS).
   const geoDistance = (r: ApiGeocodeResult): string | null =>
@@ -419,11 +440,19 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.sheetContent}>
-          {/* Search pill — opens isolated modal */}
+          {/* Search pill — opens isolated modal; mostra la destinazione scelta */}
           <TouchableOpacity style={styles.searchPill} onPress={openSearchModal} activeOpacity={0.8}>
-            <Ionicons name="search-outline" size={16} color={Colors.muted} />
-            <Text style={styles.searchPillText}>Dove si va?</Text>
-            <Ionicons name="chevron-forward" size={16} color="rgba(167,139,250,0.4)" />
+            <Ionicons name="search-outline" size={16} color={destination ? Colors.accent : Colors.muted} />
+            <Text style={[styles.searchPillText, destination ? { color: Colors.text } : null]} numberOfLines={1}>
+              {destination ? destination.addr : 'Dove si va?'}
+            </Text>
+            {destination ? (
+              <TouchableOpacity onPress={() => { clearDestination(); setQuery(''); }} hitSlop={8} activeOpacity={0.7}>
+                <Ionicons name="close-circle" size={18} color={Colors.muted} />
+              </TouchableOpacity>
+            ) : (
+              <Ionicons name="chevron-forward" size={16} color="rgba(167,139,250,0.4)" />
+            )}
           </TouchableOpacity>
 
           {/* Action buttons */}
@@ -474,20 +503,14 @@ export default function HomeScreen() {
                 style={styles.searchModalInput}
                 placeholder="Dove si va?"
                 placeholderTextColor={Colors.muted}
-                value={searchQuery}
-                onChangeText={setSearchQuery}
+                value={query}
+                onChangeText={setQuery}
                 returnKeyType="search"
                 autoFocus
                 autoCorrect={false}
                 onSubmitEditing={() => {
                   const r = geoResults[0];
-                  if (!r) return;
-                  const short = r.label.split(',').slice(0, 2).join(',');
-                  closeSearchModal();
-                  setTimeout(() => router.push({
-                    pathname: '/(app)/search',
-                    params: { q: short, destLat: String(r.lat), destLng: String(r.lng) }
-                  }), 250);
+                  if (r) selectHomeDestination(r);
                 }}
               />
               <TouchableOpacity onPress={closeSearchModal} style={styles.searchModalCloseBtn} activeOpacity={0.7}>
@@ -499,7 +522,7 @@ export default function HomeScreen() {
 
             {/* Results body */}
             <View style={styles.searchModalBody}>
-              {searchQuery.length === 0 ? (
+              {query.length === 0 ? (
                 <View style={{ alignItems: 'center', paddingVertical: 32, gap: 8 }}>
                   <Ionicons name="search-outline" size={34} color={Colors.muted} />
                   <Text style={{ color: Colors.muted, fontSize: 14 }}>
@@ -517,13 +540,7 @@ export default function HomeScreen() {
                         key={`${r.lat}-${r.lng}-${i}`}
                         style={styles.searchModalItem}
                         activeOpacity={0.7}
-                        onPress={() => {
-                          closeSearchModal();
-                          setTimeout(() => router.push({
-                            pathname: '/(app)/search',
-                            params: { q: short, destLat: String(r.lat), destLng: String(r.lng) }
-                          }), 250);
-                        }}
+                        onPress={() => selectHomeDestination(r)}
                       >
                         <View style={styles.searchModalItemIcon}>
                           <Ionicons name="location-outline" size={17} color={Colors.accent} />

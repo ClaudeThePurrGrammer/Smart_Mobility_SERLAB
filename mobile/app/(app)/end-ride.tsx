@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, BackHandler } from 'react-native';
 import MapView, { Marker, Circle, PROVIDER_GOOGLE } from 'react-native-maps';
 import { Ionicons, MaterialCommunityIcons, FontAwesome } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -42,6 +42,14 @@ export default function EndRideScreen() {
     ? { latitude: Number(params.endLat), longitude: Number(params.endLng) }
     : DEFAULT_CENTER;
 
+  // Blocca il back hardware: la corsa è chiusa sul backend ma la sessione è
+  // ancora attiva (tab bloccate). L'unica uscita è "Conferma parcheggio e
+  // termina", che chiama endSession() e sblocca la navigazione.
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => true);
+    return () => sub.remove();
+  }, []);
+
   // ── Aree di parcheggio ─────────────────────────────────────────────────────
   const [areas, setAreas] = useState<ApiParkingArea[]>([]);
   const [loadingAreas, setLoadingAreas] = useState(true);
@@ -74,8 +82,8 @@ export default function EndRideScreen() {
         });
       } catch {}
     }
-    // Safety net: garantisce che la sessione locale sia sempre pulita
-    // anche se active-ride non ha chiamato endSession() (es. crash, back gesture).
+    // Chiusura della sessione: SOLO qui, dopo la conferma del parcheggio.
+    // Da questo momento session torna null → tab bar e navigazione sbloccate.
     endSession();
     router.replace('/(app)');
   };

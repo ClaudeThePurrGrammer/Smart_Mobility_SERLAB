@@ -1,8 +1,14 @@
-import { Tabs } from 'expo-router';
+import { useEffect } from 'react';
+import { Tabs, router, usePathname } from 'expo-router';
 import { View } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '@/constants/theme';
 import { RideSessionProvider, useRideSession } from '@/lib/ride/RideSessionContext';
+import { SearchProvider } from '@/lib/search/SearchContext';
+
+// Schermate raggiungibili durante una corsa attiva: il flusso di uscita
+// consentito è solo active-ride → end-ride. Tutto il resto è bloccato.
+const RIDE_LOCKED_ALLOWED = ['/active-ride', '/end-ride'];
 
 function TabIcon({ name, color, focused }: { name: any; color: string; focused: boolean }) {
   return (
@@ -47,19 +53,44 @@ function ActiveRideTabIcon({ color, focused }: { color: string; focused: boolean
 }
 
 export default function AppLayout() {
+  // I provider devono stare SOPRA <AppTabs> così da poter leggere session.
   return (
     <RideSessionProvider>
+      <SearchProvider>
+        <AppTabs />
+      </SearchProvider>
+    </RideSessionProvider>
+  );
+}
+
+function AppTabs() {
+  const { session } = useRideSession();
+  const pathname = usePathname();
+
+  // Corsa attiva ⇒ tab bloccate. Se l'utente raggiunge una qualsiasi schermata
+  // non consentita (back gesture, deep link), viene riportato su active-ride.
+  // Il blocco si basa solo su session (RideSessionContext): nessun flag locale.
+  useEffect(() => {
+    if (session && !RIDE_LOCKED_ALLOWED.includes(pathname)) {
+      router.replace('/(app)/active-ride');
+    }
+  }, [session, pathname]);
+
+  return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarStyle: {
-          backgroundColor: Colors.card,
-          borderTopColor: Colors.border,
-          borderTopWidth: 1,
-          height: 70,
-          paddingBottom: 10,
-          paddingTop: 8,
-        },
+        // Durante la corsa la tab bar è completamente nascosta.
+        tabBarStyle: session
+          ? { display: 'none' }
+          : {
+              backgroundColor: Colors.card,
+              borderTopColor: Colors.border,
+              borderTopWidth: 1,
+              height: 70,
+              paddingBottom: 10,
+              paddingTop: 8,
+            },
         tabBarActiveTintColor: Colors.primary,
         tabBarInactiveTintColor: Colors.muted,
         tabBarLabelStyle: { fontSize: 11, fontWeight: '500' },
@@ -143,6 +174,5 @@ export default function AppLayout() {
       <Tabs.Screen name="vehicle-action"  options={{ href: null }} />
       <Tabs.Screen name="activate"        options={{ href: null }} />
     </Tabs>
-    </RideSessionProvider>
   );
 }

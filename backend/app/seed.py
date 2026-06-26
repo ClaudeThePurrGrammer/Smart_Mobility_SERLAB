@@ -33,6 +33,56 @@ def rand_coord(center, radius_km=2.5):
     dist  = random.uniform(0, r)
     return center[0] + dist * math.cos(angle), center[1] + dist * math.sin(angle)
 
+# ── Modello "terraferma" dell'area urbana di Bari ─────────────────────────────
+# La costa adriatica taglia l'area urbana da NO a SE: i punti a NE della costa
+# cadono in mare (veicoli invisibili/inutilizzabili sulla mappa). Per evitarlo,
+# l'area edificata a SO della costa è approssimata da una "scala" di rettangoli
+# noti per essere terraferma. Solo i bounds dell'area sono fissi: nessuna
+# coordinata di veicolo è hardcoded.
+BARI_BOUNDS = dict(lat_min=41.05, lat_max=41.17, lng_min=16.82, lng_max=16.92)
+
+# Rettangoli (lat_min, lat_max, lng_min, lng_max) interamente su terraferma.
+# Salendo di longitudine (verso E) il tetto di latitudine scende, seguendo la
+# costa: così i bacini portuali a N e l'Adriatico a NE restano esclusi.
+BARI_LAND_RECTS = [
+    (41.050, 41.140, 16.820, 16.860),
+    (41.050, 41.128, 16.860, 16.872),
+    (41.050, 41.115, 16.872, 16.882),
+    (41.050, 41.103, 16.882, 16.892),
+    (41.050, 41.091, 16.892, 16.902),
+]
+
+# Tentativi massimi di campionamento prima di rinunciare (evita loop infiniti).
+MAX_COORD_ATTEMPTS = 100
+
+
+def is_on_land(lat: float, lng: float) -> bool:
+    """True se (lat, lng) è sulla terraferma dell'area urbana di Bari.
+
+    Approccio leggero, senza dipendenze esterne: il punto deve cadere dentro
+    BARI_BOUNDS e dentro almeno uno dei rettangoli terra di BARI_LAND_RECTS.
+    """
+    if not (BARI_BOUNDS["lat_min"] <= lat <= BARI_BOUNDS["lat_max"]
+            and BARI_BOUNDS["lng_min"] <= lng <= BARI_BOUNDS["lng_max"]):
+        return False
+    return any(
+        lat_min <= lat <= lat_max and lng_min <= lng <= lng_max
+        for (lat_min, lat_max, lng_min, lng_max) in BARI_LAND_RECTS
+    )
+
+
+def rand_land_coord(center=BARI_CENTER, radius_km=2.5, max_attempts=MAX_COORD_ATTEMPTS):
+    """Campiona una coordinata casuale vicino al centro che cada sulla terraferma.
+
+    Riprova fino a max_attempts volte; restituisce None se nessun punto valido
+    è stato trovato (così il chiamante può loggare un warning e saltare).
+    """
+    for _ in range(max_attempts):
+        lat, lng = rand_coord(center, radius_km)
+        if is_on_land(lat, lng):
+            return lat, lng
+    return None
+
 PROMOTIONS = [
     dict(kind="active", code="SMART2026", title="Codice attivo", body="3 corse gratuite",
          reward="3 corse gratuite", icon="gift", color="#7C3AED",
@@ -75,6 +125,38 @@ def cleanup_orphans(db: Session) -> None:
     print(f"[cleanup] Chiuse {len(orphans)} corse orfane.")
 
 
+def fix_sea_vehicles(db: Session) -> None:
+    """Riposiziona sulla terraferma i veicoli con coordinate finite in mare.
+
+    Sicuro e idempotente. NON sposta (né cancella) i veicoli con una corsa in
+    corso: status == 'in_use' oppure con una Ride 'active'/'paused' collegata —
+    la loro posizione riflette una corsa reale e non va alterata.
+    """
+    # Veicoli con corsa attiva/in pausa: intoccabili.
+    busy_ids = {
+        vid for (vid,) in db.query(Ride.vehicle_id)
+        .filter(Ride.status.in_(("active", "paused")), Ride.vehicle_id.isnot(None))
+        .all()
+    }
+    fixed = 0
+    for v in db.query(Vehicle).all():
+        if is_on_land(v.lat, v.lng):
+            continue
+        if v.status == "in_use" or v.id in busy_ids:
+            continue  # corsa in corso: non spostare il veicolo
+        coord = rand_land_coord()
+        if coord is None:
+            print(f"[fix_sea_vehicles][warn] Nessuna coordinata valida (on land) trovata "
+                  f"dopo {MAX_COORD_ATTEMPTS} tentativi per il veicolo #{v.id} ({v.name}): "
+                  f"lasciato invariato.")
+            continue
+        v.lat, v.lng = coord
+        fixed += 1
+    if fixed:
+        db.commit()
+        print(f"[fix_sea_vehicles] Riposizionati {fixed} veicoli da mare a terraferma.")
+
+
 def reset_and_reseed(db: Session) -> None:
     """Azzera tutti i dati utente e risemina da zero.
 
@@ -100,10 +182,18 @@ def reset_and_reseed(db: Session) -> None:
 
 
 def seed(db: Session) -> None:
+    # Prima di tutto: riporta a terra eventuali veicoli già nel DB finiti in mare.
+    fix_sea_vehicles(db)
+
     if db.query(Vehicle).count() == 0:
         for i in range(40):
             vtype, name, model, fee, ppm = TYPES[i % len(TYPES)]
-            lat, lng = rand_coord(BARI_CENTER)
+            coord = rand_land_coord()
+            if coord is None:
+                print(f"[seed][warn] Nessuna coordinata valida (on land) trovata dopo "
+                      f"{MAX_COORD_ATTEMPTS} tentativi per il veicolo {name}-{i+1:02d}: saltato.")
+                continue
+            lat, lng = coord
             db.add(Vehicle(
                 name=f"{name}-{i+1:02d}",
                 model=model,

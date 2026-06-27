@@ -37,6 +37,7 @@ export default function RegisterScreen() {
   const [error, setError] = useState<string | null>(null);
   const [role, setRole] = useState<Role>('UTENTE');
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [phone, setPhone] = useState('');
   const [codiceAttivazione, setCodiceAttivazione] = useState('');
 
   const codiceAnim = useRef(new Animated.Value(0)).current;
@@ -81,6 +82,7 @@ export default function RegisterScreen() {
         email: email.trim(),
         password,
         role,
+        ...(phone.trim() ? { phone: phone.trim() } : {}),
         ...(needsCodice ? { codice_attivazione: codiceAttivazione } : {}),
       });
       const dest = u.role === 'AMMINISTRAZIONE' ? '/(admin)' : u.role === 'OPERATORE' ? '/(operatore)' : '/(app)';
@@ -151,6 +153,8 @@ export default function RegisterScreen() {
           </View>
 
           {field('mail-outline', email, setEmail, 'Email', { keyboardType: 'email-address', autoCapitalize: 'none' })}
+
+          {field('call-outline', phone, setPhone, 'Numero di telefono (opzionale)', { keyboardType: 'phone-pad' })}
 
           {/* Password */}
           <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border, borderRadius: 14, paddingHorizontal: 16, height: 54 }}>

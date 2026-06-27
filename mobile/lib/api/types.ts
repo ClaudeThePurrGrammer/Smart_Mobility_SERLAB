@@ -236,3 +236,14 @@ export interface ApiRouteOption {
   aree_vietate: string[];
   label: string;
 }
+
+export interface ApiAreaDensita {
+  area_id: number;
+  nome: string;
+  lat: number;
+  lng: number;
+  mezzi: number;
+  capienza: number;
+  livello: 'BASSA' | 'OK' | 'ALTA';
+  stato: 'VUOTA' | 'CRITICA' | 'OK' | 'PIENA';
+}

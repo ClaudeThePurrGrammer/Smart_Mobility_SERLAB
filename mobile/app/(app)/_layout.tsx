@@ -11,8 +11,11 @@ import { ReservationSessionProvider, useReservationSession } from '@/lib/reserva
 import { SearchProvider } from '@/lib/search/SearchContext';
 
 // Logout forzato quando l'account viene sospeso/bloccato dall'operatore:
-// (1) reattivo via interceptor 403 dell'API client, (2) polling di sicurezza
-// ogni 30s su /auth/me mentre l'app è aperta. Mostra un Alert e torna al login.
+// (1) reattivo via interceptor 403 dell'API client su qualsiasi chiamata API,
+// (2) polling attivo ogni 5s su /auth/me → kick quasi istantaneo anche se
+//     l'utente è inattivo su una schermata che non fa chiamate proprie.
+const ACCOUNT_POLL_MS = 5_000;
+
 function AccountStatusGuard() {
   const { token, logout } = useAuth();
   const firingRef = useRef(false);
@@ -38,11 +41,14 @@ function AccountStatusGuard() {
     return () => registerAccountBlockedCallback(null);
   }, [logout]);
 
-  // Polling di sicurezza: se l'utente è inattivo, forziamo una chiamata che,
-  // in caso di account bloccato, restituisce 403 → scatta l'interceptor.
+  // Polling ogni 5s: se l'account viene bloccato/sospeso, il backend risponde
+  // 403 → l'interceptor in client.ts chiama handleBlocked → Alert + logout.
+  // Il .catch() sopprime l'errore ma il callback è già stato invocato prima del throw.
   useEffect(() => {
     if (!token) return;
-    const id = setInterval(() => { authApi.me(token).catch(() => {}); }, 30_000);
+    // Controllo immediato all'avvio (es. token ripristinato da sessione salvata).
+    authApi.me(token).catch(() => {});
+    const id = setInterval(() => { authApi.me(token).catch(() => {}); }, ACCOUNT_POLL_MS);
     return () => clearInterval(id);
   }, [token]);
 

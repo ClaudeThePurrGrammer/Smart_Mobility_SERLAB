@@ -3,6 +3,7 @@ Tutte le route richiedono ruolo OPERATORE. Il Controller coordina il Model."""
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -207,18 +208,50 @@ def blocco_remoto(
     return v
 
 
+class BonusConfigIn(BaseModel):
+    soglia_corse: int   # numero corse consecutive richieste
+    punti_bonus:  int   # punti da assegnare
+
+
+@router.get("/bonus/config")
+def get_bonus_config():
+    """UC-31 — Restituisce la configurazione attiva della regola bonus."""
+    return {"soglia_corse": BONUS_SOGLIA_CORSE, "punti_bonus": BONUS_PUNTI}
+
+
 @router.post("/bonus")
-def assegna_bonus(db: Session = Depends(get_db)):
-    """OP.07 — Assegnazione automatica bonus agli utenti virtuosi."""
+def assegna_bonus(data: BonusConfigIn, db: Session = Depends(get_db)):
+    """UC-31 — Attiva la regola e assegna il bonus agli utenti virtuosi.
+
+    Parametri configurabili dall'operatore:
+      - soglia_corse: numero minimo di corse completate per ricevere il bonus
+      - punti_bonus:  punti assegnati a ogni utente idoneo
+    """
+    if data.soglia_corse <= 0:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            "Il numero di corse deve essere maggiore di zero.")
+    if data.punti_bonus <= 0:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            "I punti bonus devono essere maggiori di zero.")
+
     premiati = []
     for u in db.query(User).filter(User.role == "UTENTE", User.account_status == "ATTIVO").all():
-        corse = db.query(Ride).filter(Ride.user_id == u.id, Ride.status == "completed").count()
-        if corse >= BONUS_SOGLIA_CORSE:
-            u.points += BONUS_PUNTI
+        # Conta le corse completate dall'utente.
+        corse = db.query(Ride).filter(
+            Ride.user_id == u.id,
+            Ride.status == "completed",
+        ).count()
+
+        # UC-31: l'utente è idoneo se ha raggiunto la soglia di corse.
+        if corse >= data.soglia_corse:
+            u.points += data.punti_bonus
             db.add(Message(
                 user_id=u.id, type="promo", title="🎁 Bonus fedeltà",
-                body=f"Complimenti! Hai ricevuto {BONUS_PUNTI} punti bonus per le tue corse corrette.",
+                body=(
+                    f"Complimenti! Hai ricevuto {data.punti_bonus} punti bonus "
+                    f"per aver completato {corse} corse sulla piattaforma."
+                ),
             ))
             premiati.append(u.id)
     db.commit()
-    return {"premiati": premiati, "punti_assegnati": BONUS_PUNTI}
+    return {"premiati": premiati, "punti_assegnati": data.punti_bonus, "soglia_corse": data.soglia_corse}

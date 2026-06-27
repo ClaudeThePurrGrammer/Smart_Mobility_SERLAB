@@ -2,7 +2,7 @@
 
 import { apiFetch } from './client';
 import type {
-  ApiAreaRestrizioneOut, ApiGeocodeResult, ApiMessage, ApiMonitoraggioFrequenza,
+  ApiAreaDensita, ApiAreaRestrizioneOut, ApiGeocodeResult, ApiMessage, ApiMonitoraggioFrequenza,
   ApiParkingArea, ApiPaymentMethod, ApiPreferences, ApiPromotion, ApiReport, ApiReservation, ApiRide,
   ApiReportMobilita, ApiRouteOption, ApiRoutePoint, ApiSegnalazione, ApiSegnalazioneZona,
   ApiTrattaFrequenza, ApiUser, ApiUserAdmin, ApiVehicle, ApiWallet, TokenResponse,
@@ -163,6 +163,14 @@ export const operatoreApi = {
       body: { locked },
       token,
     }),
+  areeDensita: (token: string) =>
+    apiFetch<ApiAreaDensita[]>('/operatore/aree-densita', { token }),
+  getBonusConfig: (token: string) =>
+    apiFetch<{ soglia_corse: number; punti_bonus: number }>('/operatore/bonus/config', { token }),
+  assegnaBonus: (token: string, soglia_corse: number, punti_bonus: number) =>
+    apiFetch<{ premiati: number[]; punti_assegnati: number; soglia_corse: number }>(
+      '/operatore/bonus', { method: 'POST', body: { soglia_corse, punti_bonus }, token },
+    ),
 };
 
 // ─── Amministrazione ─────────────────────────────────────────────────────

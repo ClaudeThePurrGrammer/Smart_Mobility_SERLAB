@@ -36,6 +36,11 @@ services:
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - FACEBOOK_APP_ID=${FACEBOOK_APP_ID:-}
       - FACEBOOK_APP_SECRET=${FACEBOOK_APP_SECRET:-}
+    # Volume mount: le modifiche ai file Python sono visibili immediatamente.
+    # --reload: uvicorn rileva i cambiamenti e riavvia il server senza rebuild Docker.
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    volumes:
+      - ./backend:/app
     depends_on:
       - db
     restart: unless-stopped

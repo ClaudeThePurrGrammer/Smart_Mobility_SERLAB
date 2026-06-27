@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..deps import require_role
 from ..models import AzioneOperatoreLog, Message, ParkingArea, Ride, Segnalazione, User, Vehicle
+from ..seed import _nearest_area, _point_in_any_area, rand_coord_in_area
 from ..schemas import (
     AccountStatusIn, SegnalazioneOut, UserAdminOut, VehicleLockIn, VehicleOut,
 )
@@ -47,10 +48,15 @@ def flotta(db: Session = Depends(get_db)):
 
 @router.get("/mezzi-rilascio", response_model=list[VehicleOut])
 def mezzi_rilascio(db: Session = Depends(get_db)):
-    """OP.04 — Posizione dei mezzi a fine corsa (mezzi liberi sulla mappa)."""
+    """UC-28 / OP.04 — Posizione di tutti i mezzi a fine corsa (parcheggiati, anche bloccati).
+
+    Restituisce tutti i veicoli con status='parked', indipendentemente dal flag locked:
+    l'operatore deve vedere DOVE si trovano fisicamente tutti i mezzi, inclusi quelli
+    che ha bloccato remotamente.
+    """
     return (
         db.query(Vehicle)
-        .filter(Vehicle.status == "parked", Vehicle.locked == False)  # noqa: E712
+        .filter(Vehicle.status == "parked")
         .order_by(Vehicle.id)
         .all()
     )
@@ -67,9 +73,17 @@ def aree_densita(db: Session = Depends(get_db)):
         deg = a.radius_m / 111000.0
         count = sum(1 for v in vehicles if abs(v.lat - a.lat) < deg and abs(v.lng - a.lng) < deg)
         livello = "BASSA" if count < SOGLIA_BASSA else "ALTA" if count > SOGLIA_ALTA else "OK"
+        if count == 0:
+            stato = "VUOTA"
+        elif count <= 2:
+            stato = "CRITICA"
+        elif count < 6:
+            stato = "OK"
+        else:
+            stato = "PIENA"
         out.append({
             "area_id": a.id, "nome": a.name, "lat": a.lat, "lng": a.lng,
-            "mezzi": count, "capienza": a.capacity, "livello": livello,
+            "mezzi": count, "capienza": a.capacity, "livello": livello, "stato": stato,
         })
     return out
 
@@ -171,6 +185,14 @@ def blocco_remoto(
         v.status = "parked"
         azione = "SBLOCCO_REMOTO_MEZZO"
         dettaglio = f"vehicle_id={vehicle_id}"
+
+    # REGOLA UNIVERSALE: un mezzo 'parked' deve stare DENTRO un'area di sosta.
+    # Se il blocco ha fermato un mezzo in corsa (fuori area), lo riportiamo dentro.
+    _aree = db.query(ParkingArea).all()
+    if _aree and not _point_in_any_area(v.lat, v.lng, _aree):
+        _area = _nearest_area(v.lat, v.lng, _aree)
+        if _area:
+            v.lat, v.lng = rand_coord_in_area(_area.lat, _area.lng, _area.radius_m)
 
     db.add(AzioneOperatoreLog(
         operatore_id=operatore.id,

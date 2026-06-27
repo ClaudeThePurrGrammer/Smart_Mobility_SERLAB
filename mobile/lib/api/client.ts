@@ -32,6 +32,13 @@ export class ApiError extends Error {
   }
 }
 
+// Logout forzato globale: registrato dal layout autenticato, viene invocato
+// quando il backend risponde 403 perché l'account è sospeso/bloccato (deps.py).
+let onAccountBlocked: (() => void) | null = null;
+export function registerAccountBlockedCallback(cb: (() => void) | null) {
+  onAccountBlocked = cb;
+}
+
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
@@ -65,6 +72,11 @@ export async function apiFetch<T>(path: string, opts: RequestOptions = {}): Prom
 
   if (!res.ok) {
     const detail = (data && (data.detail || data.message)) || `Errore ${res.status}`;
+    // 403 per account sospeso/bloccato → logout immediato (il detail contiene
+    // "Account…"; distinguibile dai 403 di ruolo "Permessi insufficienti…").
+    if (res.status === 403 && typeof detail === 'string' && /account/i.test(detail)) {
+      onAccountBlocked?.();
+    }
     throw new ApiError(typeof detail === 'string' ? detail : 'Richiesta non valida', res.status);
   }
   return data as T;

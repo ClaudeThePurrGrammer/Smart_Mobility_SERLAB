@@ -185,13 +185,14 @@ export default function SearchScreen() {
   const optimalFor = (type: string): ApiRouteOption | null => routesByType[type]?.[0] ?? null;
 
   // ── Costruzione card mezzi con dati reali calcolati ────────────────────────
-  // Mostra SOLO i mezzi realmente disponibili (status === 'available') ed entro
+  // Mostra SOLO i mezzi prelevabili (status === 'parked', non bloccati) ed entro
   // DEFAULT_SEARCH_RADIUS_KM dalla posizione GPS reale. Senza GPS: nessun mezzo.
+  // Nota: il backend con only_available=true restituisce già solo parked & !locked.
   const allVehicles: Vehicle[] = useMemo(() => {
     if (!coords) return [];
     const radiusM = DEFAULT_SEARCH_RADIUS_KM * 1000;
     return rawVehicles
-      .filter((v) => v.status === 'available')
+      .filter((v) => v.status === 'parked')
       .map((v) => ({ v, distanceToM: Math.round(haversineMeters(coords, { latitude: v.lat, longitude: v.lng })) }))
       .filter(({ distanceToM }) => distanceToM <= radiusM)
       .map(({ v, distanceToM }, idx) => {

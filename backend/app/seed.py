@@ -129,6 +129,7 @@ def cleanup_orphans(db: Session) -> None:
     if not orphans:
         return
     now = datetime.now(timezone.utc)
+    areas = db.query(ParkingArea).all()  # per riportare il mezzo dentro un'area
     for r in orphans:
         elapsed_s = max(0.0, (now - r.started_at).total_seconds())
         r.minutes = max(0, int(elapsed_s / 60))
@@ -139,6 +140,10 @@ def cleanup_orphans(db: Session) -> None:
             v = db.get(Vehicle, r.vehicle_id)
             if v and v.status == "in_use":
                 v.status = "parked"  # rimette il mezzo in stato prelevabile
+                # REGOLA UNIVERSALE: parcheggiato = dentro un'area di sosta.
+                area = _nearest_area(v.lat, v.lng, areas)
+                if area:
+                    v.lat, v.lng = rand_coord_in_area(area.lat, area.lng, area.radius_m)
     db.commit()
     print(f"[cleanup] Chiuse {len(orphans)} corse orfane.")
 
@@ -173,6 +178,56 @@ def fix_sea_vehicles(db: Session) -> None:
     if fixed:
         db.commit()
         print(f"[fix_sea_vehicles] Riposizionati {fixed} veicoli da mare a terraferma.")
+
+
+def _dist_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """Distanza in metri tra due coordinate (haversine)."""
+    R = 6_371_000.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlmb = math.radians(lng2 - lng1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlmb / 2) ** 2
+    return R * 2 * math.asin(math.sqrt(a))
+
+
+def _nearest_area(lat: float, lng: float, areas):
+    return min(areas, key=lambda a: _dist_m(lat, lng, a.lat, a.lng)) if areas else None
+
+
+def _point_in_any_area(lat: float, lng: float, areas) -> bool:
+    return any(_dist_m(lat, lng, a.lat, a.lng) <= a.radius_m for a in areas)
+
+
+def ensure_parked_in_areas(db: Session) -> None:
+    """REGOLA UNIVERSALE: ogni veicolo con stato 'parked' DEVE stare DENTRO
+    un'area di parcheggio. È vietato lasciare mezzi parcheggiati fuori area.
+
+    Sposta nell'area di sosta più vicina tutti i mezzi 'parked' finiti fuori da
+    qualsiasi area. NON tocca i mezzi 'in_use' o con corsa attiva/in pausa
+    (la loro posizione riflette una corsa reale). Idempotente: eseguito ad ogni
+    avvio del backend (dentro seed()) e invocabile come migrazione one-shot.
+    """
+    areas = db.query(ParkingArea).all()
+    if not areas:
+        return
+    busy_ids = {
+        vid for (vid,) in db.query(Ride.vehicle_id)
+        .filter(Ride.status.in_(("active", "paused")), Ride.vehicle_id.isnot(None)).all()
+    }
+    moved = 0
+    for v in db.query(Vehicle).filter(Vehicle.status == "parked").all():
+        if v.id in busy_ids:
+            continue
+        if _point_in_any_area(v.lat, v.lng, areas):
+            continue
+        area = _nearest_area(v.lat, v.lng, areas)
+        if area is None:
+            continue
+        v.lat, v.lng = rand_coord_in_area(area.lat, area.lng, area.radius_m)
+        moved += 1
+    if moved:
+        db.commit()
+        print(f"[ensure_parked_in_areas] Spostati {moved} mezzi 'parked' dentro le aree di sosta.")
 
 
 def ensure_parking_areas(db: Session) -> None:
@@ -434,6 +489,9 @@ def seed(db: Session) -> None:
         print(f"[seed] {NUM_SEED} veicoli parcheggiati nelle aree di Bari ({len(bari_areas)} aree).")
 
     ensure_electric_cars(db)
+
+    # REGOLA UNIVERSALE: nessun mezzo 'parked' fuori dalle aree di sosta.
+    ensure_parked_in_areas(db)
 
     if db.query(Promotion).count() == 0:
         for p in PROMOTIONS:

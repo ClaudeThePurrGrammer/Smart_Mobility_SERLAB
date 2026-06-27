@@ -85,6 +85,7 @@ export interface DensitaArea {
   mezzi: number;
   capienza: number;
   livello: 'BASSA' | 'OK' | 'ALTA';
+  stato: 'VUOTA' | 'CRITICA' | 'OK' | 'PIENA';
 }
 
 export interface UtilizzoTipo { tipo: string; corse: number; km_totali: number; minuti_totali: number; }

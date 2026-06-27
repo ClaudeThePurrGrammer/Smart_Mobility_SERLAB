@@ -128,7 +128,7 @@ export default function BloccoRemotoScreen() {
 
   const nBloccati = items.filter(v => v.locked).length;
   const nInUso    = items.filter(v => v.status === 'in_use').length;
-  const nLiberi   = items.filter(v => v.status === 'available').length;
+  const nLiberi   = items.filter(v => v.status === 'parked' && !v.locked).length;
 
   // ── Render ────────────────────────────────────────────────────────────────
 

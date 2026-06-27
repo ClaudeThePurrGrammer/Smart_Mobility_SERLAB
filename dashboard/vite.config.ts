@@ -12,6 +12,10 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5173,
+    watch: {
+      usePolling: true,   // necessario su Windows + Docker: inotify non funziona sui volumi montati
+      interval: 300,
+    },
     proxy: {
       '/api': { target: API_TARGET, changeOrigin: true, rewrite: (p) => p.replace(/^\/api/, '') },
       '/ws': { target: WS_TARGET, ws: true },

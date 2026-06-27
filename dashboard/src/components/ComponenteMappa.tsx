@@ -28,12 +28,15 @@ export default function ComponenteMappa({
   zones = [],
   onMapClick,
   height = 420,
+  dark = false,
 }: {
   center?: [number, number];
   markers?: MapMarker[];
   zones?: MapZone[];
   onMapClick?: (lat: number, lng: number) => void;
   height?: number;
+  /** Tile scuro (CARTO dark) per assomigliare alla mappa dell'app utente. */
+  dark?: boolean;
 }) {
   function ClickCatcher() {
     const map = useMap();
@@ -50,8 +53,10 @@ export default function ComponenteMappa({
     <div className="map-box" style={{ height }}>
       <MapContainer center={center} zoom={13} style={{ height: '100%', width: '100%' }}>
         <TileLayer
-          attribution='&copy; OpenStreetMap'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution={dark ? '&copy; OpenStreetMap &copy; CARTO' : '&copy; OpenStreetMap'}
+          url={dark
+            ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+            : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'}
         />
         <Recenter center={center} />
         {onMapClick && <ClickCatcher />}

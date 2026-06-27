@@ -1,11 +1,53 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Tabs, router, usePathname, useRootNavigationState } from 'expo-router';
-import { View } from 'react-native';
+import { View, Alert } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '@/constants/theme';
+import { useAuth } from '@/lib/auth/AuthContext';
+import { authApi } from '@/lib/api/endpoints';
+import { registerAccountBlockedCallback } from '@/lib/api/client';
 import { RideSessionProvider, useRideSession } from '@/lib/ride/RideSessionContext';
 import { ReservationSessionProvider, useReservationSession } from '@/lib/reservation/ReservationSessionContext';
 import { SearchProvider } from '@/lib/search/SearchContext';
+
+// Logout forzato quando l'account viene sospeso/bloccato dall'operatore:
+// (1) reattivo via interceptor 403 dell'API client, (2) polling di sicurezza
+// ogni 30s su /auth/me mentre l'app è aperta. Mostra un Alert e torna al login.
+function AccountStatusGuard() {
+  const { token, logout } = useAuth();
+  const firingRef = useRef(false);
+
+  useEffect(() => {
+    const handleBlocked = () => {
+      if (firingRef.current) return;
+      firingRef.current = true;
+      Alert.alert(
+        'Account non disponibile',
+        'Il tuo account è stato sospeso o bloccato dall\'operatore. Contatta il supporto per maggiori informazioni.',
+        [{
+          text: 'OK',
+          onPress: async () => {
+            await logout();
+            router.replace('/(auth)/login');
+          },
+        }],
+        { cancelable: false },
+      );
+    };
+    registerAccountBlockedCallback(handleBlocked);
+    return () => registerAccountBlockedCallback(null);
+  }, [logout]);
+
+  // Polling di sicurezza: se l'utente è inattivo, forziamo una chiamata che,
+  // in caso di account bloccato, restituisce 403 → scatta l'interceptor.
+  useEffect(() => {
+    if (!token) return;
+    const id = setInterval(() => { authApi.me(token).catch(() => {}); }, 30_000);
+    return () => clearInterval(id);
+  }, [token]);
+
+  return null;
+}
 
 // Schermate raggiungibili durante una corsa attiva: il flusso di uscita
 // consentito è solo active-ride → end-ride. Tutto il resto è bloccato.
@@ -66,6 +108,7 @@ export default function AppLayout() {
     <RideSessionProvider>
       <ReservationSessionProvider>
         <SearchProvider>
+          <AccountStatusGuard />
           <AppTabs />
         </SearchProvider>
       </ReservationSessionProvider>

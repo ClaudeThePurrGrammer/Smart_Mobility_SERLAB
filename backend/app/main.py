@@ -23,6 +23,13 @@ def _ensure_schema() -> None:
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'UTENTE'",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS account_status VARCHAR(20) DEFAULT 'ATTIVO'",
         "ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS locked BOOLEAN DEFAULT FALSE",
+        # UC-19: zona geocodificata e periodo validità segnalazione (migration 0002_zona).
+        "ALTER TABLE segnalazioni ADD COLUMN IF NOT EXISTS zona VARCHAR(200)",
+        "ALTER TABLE segnalazioni ADD COLUMN IF NOT EXISTS valida_dal DATE",
+        "ALTER TABLE segnalazioni ADD COLUMN IF NOT EXISTS valida_al DATE",
+        # UC-21: periodo di validità area restrizione (migration 0003_aree).
+        "ALTER TABLE aree_restrizione ADD COLUMN IF NOT EXISTS valida_dal DATE",
+        "ALTER TABLE aree_restrizione ADD COLUMN IF NOT EXISTS valida_al DATE",
     ]
     with engine.begin() as conn:
         for stmt in stmts:

@@ -1,8 +1,8 @@
 """Modelli del dominio (tabelle PostgreSQL)."""
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from sqlalchemy import (
-    JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text,
+    JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -131,7 +131,7 @@ class Ride(Base):
     minutes: Mapped[int] = mapped_column(Integer, default=0)
     cost: Mapped[float] = mapped_column(Float, default=0.0)
     points: Mapped[int] = mapped_column(Integer, default=0)
-    status: Mapped[str] = mapped_column(String(20), default="completed")  # active | completed
+    status: Mapped[str] = mapped_column(String(20), default="completed")  # active | paused | completed | interrupted (OP.09: blocco remoto mezzo)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -215,10 +215,28 @@ class Segnalazione(Base):
     gps_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     gps_lng: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    # UC-19: zona testuale geocodificata e periodo di validità della segnalazione.
+    zona: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    valida_dal: Mapped[date | None] = mapped_column(Date, nullable=True)
+    valida_al: Mapped[date | None] = mapped_column(Date, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     user = relationship("User", back_populates="segnalazioni")
+
+
+class AzioneOperatoreLog(Base):
+    """Log audit delle azioni operative (OP.08+): chi ha fatto cosa, su chi, perché."""
+    __tablename__ = "azioni_operatore_log"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    operatore_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    utente_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    azione: Mapped[str] = mapped_column(String(60))   # es. CAMBIO_STATO_ACCOUNT
+    motivo: Mapped[str] = mapped_column(Text, default="")
+    dettaglio: Mapped[str] = mapped_column(Text, default="")  # es. "ATTIVO → SOSPESO"
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
 class AreaRestrizione(Base):
@@ -238,6 +256,10 @@ class AreaRestrizione(Base):
     orario: Mapped[str | None] = mapped_column(String(40), nullable=True)
     attiva: Mapped[bool] = mapped_column(Boolean, default=True)
     note: Mapped[str] = mapped_column(Text, default="")
+
+    # UC-21: periodo di validità dell'area (nullable = validità indefinita).
+    valida_dal: Mapped[date | None] = mapped_column(Date, nullable=True)
+    valida_al: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

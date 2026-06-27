@@ -1,13 +1,15 @@
 """GestioneOperatore — funzionalità operative (user story OP.01–OP.09).
 Tutte le route richiedono ruolo OPERATORE. Il Controller coordina il Model."""
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import require_role
-from ..models import Message, ParkingArea, Ride, User, Vehicle
+from ..models import AzioneOperatoreLog, Message, ParkingArea, Ride, Segnalazione, User, Vehicle
 from ..schemas import (
-    AccountStatusIn, UserAdminOut, VehicleLockIn, VehicleOut,
+    AccountStatusIn, SegnalazioneOut, UserAdminOut, VehicleLockIn, VehicleOut,
 )
 
 router = APIRouter(prefix="/operatore", tags=["operatore"], dependencies=[Depends(require_role("OPERATORE"))])
@@ -18,6 +20,23 @@ SOGLIA_ALTA = 12   # sopra → area in sovrannumero
 # OP.07 — utenti virtuosi: corse completate consecutive senza segnalazioni ALTA.
 BONUS_SOGLIA_CORSE = 5
 BONUS_PUNTI = 50
+
+
+_GRAVITA_ORD = {"ALTA": 0, "MEDIA": 1, "BASSA": 2}
+
+
+@router.get("/segnalazioni", response_model=list[SegnalazioneOut])
+def segnalazioni_mezzi(db: Session = Depends(get_db)):
+    """OP.03 — Dashboard malfunzionamenti: segnalazioni APERTE escluse quelle
+    di tipo PERCORSO (manutenzioni urbane create dall'Amministrazione Pubblica).
+    Il filtro è imposto lato backend — il frontend non può modificarlo."""
+    items = (
+        db.query(Segnalazione)
+        .filter(Segnalazione.stato == "APERTA", Segnalazione.tipo != "PERCORSO")
+        .all()
+    )
+    items.sort(key=lambda s: (_GRAVITA_ORD.get(s.gravita, 1), -s.id))
+    return items
 
 
 @router.get("/flotta", response_model=list[VehicleOut])
@@ -57,29 +76,105 @@ def lista_utenti(db: Session = Depends(get_db)):
 
 
 @router.post("/utenti/{user_id}/stato", response_model=UserAdminOut)
-def cambia_stato_utente(user_id: int, data: AccountStatusIn, db: Session = Depends(get_db)):
+def cambia_stato_utente(
+    user_id: int,
+    data: AccountStatusIn,
+    operatore: User = Depends(require_role("OPERATORE")),
+    db: Session = Depends(get_db),
+):
     """OP.08 — Sospensione/blocco/riattivazione di un account utente."""
     if data.account_status not in ("ATTIVO", "SOSPESO", "BLOCCATO"):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Stato non valido")
     target = db.get(User, user_id)
     if not target or target.role != "UTENTE":
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Utente non trovato")
+
+    vecchio_stato = target.account_status
     target.account_status = data.account_status
+
+    # Log audit
+    db.add(AzioneOperatoreLog(
+        operatore_id=operatore.id,
+        utente_id=target.id,
+        azione="CAMBIO_STATO_ACCOUNT",
+        motivo=data.motivo,
+        dettaglio=f"{vecchio_stato} → {data.account_status}",
+    ))
+
+    # Notifica in-app all'utente (solo se lo stato cambia effettivamente)
+    if data.account_status != vecchio_stato:
+        if data.account_status == "SOSPESO":
+            titolo = "Account sospeso"
+            corpo = f"Il tuo account è stato sospeso temporaneamente. Motivo: {data.motivo}"
+        elif data.account_status == "BLOCCATO":
+            titolo = "Account bloccato"
+            corpo = f"Il tuo account è stato bloccato definitivamente. Motivo: {data.motivo}"
+        else:  # ATTIVO
+            titolo = "Account riattivato"
+            corpo = "Il tuo account è stato riattivato. Puoi tornare a usare il servizio."
+        db.add(Message(user_id=target.id, type="alert", title=titolo, body=corpo))
+
     db.commit()
     db.refresh(target)
     return target
 
 
 @router.post("/mezzi/{vehicle_id}/blocco", response_model=VehicleOut)
-def blocco_remoto(vehicle_id: int, data: VehicleLockIn, db: Session = Depends(get_db)):
-    """OP.09 — Blocco/sblocco remoto di un mezzo non in uso."""
+def blocco_remoto(
+    vehicle_id: int,
+    data: VehicleLockIn,
+    operatore: User = Depends(require_role("OPERATORE")),
+    db: Session = Depends(get_db),
+):
+    """OP.09 — Blocco/sblocco remoto di un mezzo, anche durante una corsa attiva."""
     v = db.get(Vehicle, vehicle_id)
     if not v:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Mezzo non trovato")
-    if data.locked and v.status == "in_use":
-        raise HTTPException(status.HTTP_409_CONFLICT, "Impossibile bloccare un mezzo in uso")
-    v.locked = data.locked
-    v.status = "maintenance" if data.locked else "available"
+
+    ride_interrotta_id: int | None = None
+
+    if data.locked:
+        # Interrompi la corsa attiva sul mezzo (se esiste), invece di rifiutare il blocco.
+        corsa_attiva = (
+            db.query(Ride)
+            .filter(Ride.vehicle_id == vehicle_id, Ride.status.in_(["active", "paused"]))
+            .first()
+        )
+        if corsa_attiva:
+            corsa_attiva.status = "interrupted"
+            corsa_attiva.ended_at = datetime.now(timezone.utc)
+            ride_interrotta_id = corsa_attiva.id
+            db.add(Message(
+                user_id=corsa_attiva.user_id,
+                type="alert",
+                title="Corsa interrotta",
+                body=(
+                    "La tua corsa è stata interrotta perché il mezzo è stato bloccato "
+                    "dall'operatore per motivi di sicurezza. Contatta l'assistenza per informazioni."
+                ),
+            ))
+
+        v.locked = True
+        v.status = "maintenance"
+        azione = "BLOCCO_REMOTO_MEZZO"
+        dettaglio = f"vehicle_id={vehicle_id}"
+        if ride_interrotta_id:
+            dettaglio += f", ride_id={ride_interrotta_id} interrotta"
+    else:
+        # Sblocco: il mezzo torna disponibile, nessuna corsa viene ripristinata.
+        v.locked = False
+        v.status = "available"
+        azione = "SBLOCCO_REMOTO_MEZZO"
+        dettaglio = f"vehicle_id={vehicle_id}"
+
+    db.add(AzioneOperatoreLog(
+        operatore_id=operatore.id,
+        utente_id=None,
+        azione=azione,
+        motivo="",
+        dettaglio=dettaglio,
+    ))
+
     db.commit()
     db.refresh(v)
     return v

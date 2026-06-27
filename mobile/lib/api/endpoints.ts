@@ -2,13 +2,15 @@
 
 import { apiFetch } from './client';
 import type {
-  ApiGeocodeResult, ApiMessage, ApiParkingArea, ApiPaymentMethod, ApiPreferences, ApiPromotion,
-  ApiReport, ApiRide, ApiRouteOption, ApiRoutePoint, ApiUser, ApiVehicle, ApiWallet, TokenResponse,
+  ApiAreaRestrizioneOut, ApiGeocodeResult, ApiMessage, ApiMonitoraggioFrequenza,
+  ApiParkingArea, ApiPaymentMethod, ApiPreferences, ApiPromotion, ApiReport, ApiRide,
+  ApiReportMobilita, ApiRouteOption, ApiRoutePoint, ApiSegnalazione, ApiSegnalazioneZona,
+  ApiTrattaFrequenza, ApiUser, ApiUserAdmin, ApiVehicle, ApiWallet, TokenResponse,
 } from './types';
 
 // ─── Auth ────────────────────────────────────────────────────────────────
 export const authApi = {
-  register: (body: { name: string; surname: string; email: string; password: string; phone?: string }) =>
+  register: (body: { name: string; surname: string; email: string; password: string; phone?: string; role?: string; codice_attivazione?: string }) =>
     apiFetch<TokenResponse>('/auth/register', { method: 'POST', body }),
 
   login: (body: { email: string; password: string }) =>
@@ -116,4 +118,76 @@ export const reportsApi = {
   list: (token: string) => apiFetch<ApiReport[]>('/reports', { token }),
   create: (token: string, body: { category: string; description?: string }) =>
     apiFetch<ApiReport>('/reports', { method: 'POST', body, token }),
+};
+
+// ─── Segnalazioni (Operatore/Amministrazione) ────────────────────────────
+export const segnalazioniApi = {
+  listAperte: (token: string) =>
+    apiFetch<ApiSegnalazione[]>('/operatore/segnalazioni', { token }),
+  listTutteAperte: (token: string) =>
+    apiFetch<ApiSegnalazione[]>('/segnalazioni?stato=APERTA', { token }),
+  getById: (token: string, id: number) =>
+    apiFetch<ApiSegnalazione>(`/segnalazioni/${id}`, { token }),
+  chiudi: (token: string, id: number) =>
+    apiFetch<ApiSegnalazione>(`/segnalazioni/${id}/chiudi`, { method: 'PATCH', token }),
+};
+
+// ─── Operatore (gestione utenti OP.08, mezzi OP.09) ──────────────────────
+export const operatoreApi = {
+  listUtenti: (token: string) =>
+    apiFetch<ApiUserAdmin[]>('/operatore/utenti', { token }),
+  cambiaStatoUtente: (token: string, userId: number, account_status: string, motivo: string) =>
+    apiFetch<ApiUserAdmin>(`/operatore/utenti/${userId}/stato`, {
+      method: 'POST',
+      body: { account_status, motivo },
+      token,
+    }),
+  listFlotta: (token: string) =>
+    apiFetch<ApiVehicle[]>('/operatore/flotta', { token }),
+  bloccaMezzo: (token: string, vehicleId: number, locked: boolean) =>
+    apiFetch<ApiVehicle>(`/operatore/mezzi/${vehicleId}/blocco`, {
+      method: 'POST',
+      body: { locked },
+      token,
+    }),
+};
+
+// ─── Amministrazione ─────────────────────────────────────────────────────
+export const amministrazioneApi = {
+  monitoraggioFrequenza: (token: string, vehicleType: string, fromDate?: string, toDate?: string) => {
+    let url = `/amministrazione/monitoraggio/frequenza?vehicle_type=${encodeURIComponent(vehicleType)}`;
+    if (fromDate) url += `&from_date=${encodeURIComponent(fromDate)}`;
+    if (toDate) url += `&to_date=${encodeURIComponent(toDate)}`;
+    return apiFetch<ApiMonitoraggioFrequenza>(url, { token });
+  },
+
+  segnalaZona: (
+    token: string,
+    body: { zona: string; descrizione: string; valida_dal: string; valida_al: string; gravita: string; gps_lat?: number; gps_lng?: number },
+  ) => apiFetch<ApiSegnalazioneZona>('/amministrazione/segnala-zona', { method: 'POST', body, token }),
+
+  reportMobilita: (token: string, vehicleType: string, fromDate: string, toDate: string) => {
+    const url = `/amministrazione/report/mobilita?vehicle_type=${encodeURIComponent(vehicleType)}&from_date=${encodeURIComponent(fromDate)}&to_date=${encodeURIComponent(toDate)}`;
+    return apiFetch<ApiReportMobilita>(url, { token });
+  },
+
+  inserisciAreaRestrizione: (
+    token: string,
+    body: {
+      indirizzo: string;
+      radius_m: number;
+      tipo: string;
+      vehicle_types: string[];
+      note: string;
+      valida_dal: string;
+      valida_al: string;
+    },
+  ) => apiFetch<ApiAreaRestrizioneOut>('/aree-restrizione/configura', { method: 'POST', body, token }),
+
+  trattePiuUtilizzate: (token: string, vehicleType: string, fromDate?: string, toDate?: string, limit = 10) => {
+    let url = `/amministrazione/tratte/frequenza?vehicle_type=${encodeURIComponent(vehicleType)}&limit=${limit}`;
+    if (fromDate) url += `&from_date=${encodeURIComponent(fromDate)}`;
+    if (toDate)   url += `&to_date=${encodeURIComponent(toDate)}`;
+    return apiFetch<ApiTrattaFrequenza[]>(url, { token });
+  },
 };

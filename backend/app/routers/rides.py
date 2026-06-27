@@ -55,7 +55,7 @@ def start_ride(data: RideCreate, user: User = Depends(get_current_user), db: Ses
     if vehicle:
         if vehicle.type not in SUPPORTED_VEHICLE_TYPES:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Mezzo non trovato")
-        if vehicle.status != "available":
+        if vehicle.status != "parked" or vehicle.locked:
             raise HTTPException(status.HTTP_409_CONFLICT, "Mezzo non disponibile")
         vehicle.status = "in_use"
     elif data.vehicle_type not in SUPPORTED_VEHICLE_TYPES:

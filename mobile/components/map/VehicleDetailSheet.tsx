@@ -112,16 +112,24 @@ export default function VehicleDetailSheet({ vehicle, userCoords, onClose, onRes
 
         {/* ── Riga compatta (sempre visibile in peek) ── */}
         <View style={styles.peekRow}>
-          <View style={styles.iconBox}>
+          <View style={[styles.iconBox, vehicle.status === 'parked' && styles.iconBoxParked]}>
             <MaterialCommunityIcons
               name={vehicleIcon[vehicle.type] as any}
               size={26}
-              color={Colors.accent}
+              color={vehicle.status === 'parked' ? '#10B981' : Colors.accent}
             />
           </View>
 
           <View style={{ flex: 1 }}>
-            <Text style={styles.title}>{vehicleTypeLabel[vehicle.type]}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={styles.title}>{vehicleTypeLabel[vehicle.type]}</Text>
+              {vehicle.status === 'parked' && (
+                <View style={styles.parkedBadge}>
+                  <Ionicons name="location" size={10} color="#10B981" />
+                  <Text style={styles.parkedBadgeText}>Parcheggiato</Text>
+                </View>
+              )}
+            </View>
             <Text style={styles.subtitle}>{vehicle.model}</Text>
             <View style={styles.metaRow}>
               <Ionicons name="battery-half" size={14} color={batteryColor(vehicle.batteryPct)} />
@@ -255,6 +263,9 @@ const styles = StyleSheet.create({
 
   peekRow:        { flexDirection: 'row', alignItems: 'center', gap: 12 },
   iconBox:        { width: 54, height: 54, borderRadius: 14, backgroundColor: Colors.surface, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: Colors.border },
+  iconBoxParked:  { borderColor: '#10B981', backgroundColor: 'rgba(16,185,129,0.1)' },
+  parkedBadge:    { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(16,185,129,0.15)', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 1, borderColor: 'rgba(16,185,129,0.4)' },
+  parkedBadgeText:{ color: '#10B981', fontSize: 10, fontWeight: '700' },
   title:          { color: Colors.text, fontWeight: '800', fontSize: 17 },
   subtitle:       { color: Colors.muted, fontSize: 13, marginTop: 1 },
   metaRow:        { flexDirection: 'row', alignItems: 'center', marginTop: 5 },

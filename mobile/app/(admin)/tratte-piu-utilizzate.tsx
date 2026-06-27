@@ -14,15 +14,13 @@ import GradientButton from '@/components/ui/GradientButton';
 import { amministrazioneApi } from '@/lib/api/endpoints';
 import type { ApiTrattaFrequenza } from '@/lib/api/types';
 
-type VehicleType = 'scooter' | 'bike' | 'ebike' | 'car';
+type VehicleType = 'scooter' | 'ebike' | 'car';
 type PeriodMode  = 'week' | 'month' | 'year' | 'custom';
 
-// Stessi valori di monitoraggio.tsx — 'scooter' nel DB = monopattino elettrico
 const VEHICLE_OPTIONS: { type: VehicleType; label: string; icon: string }[] = [
-  { type: 'scooter', label: 'Monopattino', icon: 'speedometer-outline' },
-  { type: 'bike',    label: 'Bici',        icon: 'bicycle-outline' },
-  { type: 'ebike',   label: 'E-Bike',      icon: 'flash-outline' },
-  { type: 'car',     label: 'Auto',        icon: 'car-outline' },
+  { type: 'scooter', label: 'Monopattino Elettrico', icon: 'speedometer-outline' },
+  { type: 'ebike',   label: 'Bici Elettrica',        icon: 'bicycle-outline' },
+  { type: 'car',     label: 'Auto Elettrica',         icon: 'car-outline' },
 ];
 
 const PERIOD_OPTIONS: { mode: PeriodMode; label: string; icon: string }[] = [

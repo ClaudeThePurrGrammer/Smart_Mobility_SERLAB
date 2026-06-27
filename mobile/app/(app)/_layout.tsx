@@ -147,7 +147,7 @@ function AppTabs() {
         }}
       />
       <Tabs.Screen
-        name="scan"
+        name="activate"
         options={{
           title: 'Scansiona',
           tabBarIcon: ({ focused }) => (
@@ -190,6 +190,7 @@ function AppTabs() {
         }}
       />
       {/* Schermate fuori dal tab bar */}
+      <Tabs.Screen name="scan"         options={{ href: null }} />
       <Tabs.Screen name="reserve"      options={{ href: null }} />
       <Tabs.Screen name="active-ride"  options={{ href: null }} />
       <Tabs.Screen name="end-ride"     options={{ href: null }} />
@@ -204,7 +205,6 @@ function AppTabs() {
       <Tabs.Screen name="chat-support"    options={{ href: null }} />
       <Tabs.Screen name="ticket"          options={{ href: null }} />
       <Tabs.Screen name="vehicle-action"      options={{ href: null }} />
-      <Tabs.Screen name="activate"            options={{ href: null }} />
       <Tabs.Screen name="active-reservation"  options={{ href: null }} />
       <Tabs.Screen name="reports-history"     options={{ href: null }} />
       <Tabs.Screen name="ride-payment"        options={{ href: null }} />

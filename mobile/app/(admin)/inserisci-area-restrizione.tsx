@@ -16,7 +16,7 @@ import { amministrazioneApi } from '@/lib/api/endpoints';
 // ─── Costanti dominio ─────────────────────────────────────────────────────────
 
 type TipoRestrizione = 'NO_GO' | 'NO_PARKING' | 'ZTL' | 'PEDONALE' | 'LIMITE_VELOCITA';
-type VehicleType     = 'scooter' | 'bike' | 'ebike' | 'car';
+type VehicleType     = 'scooter' | 'ebike' | 'car';
 type PickerTarget    = 'dal' | 'al' | null;
 
 const TIPO_OPTIONS: { value: TipoRestrizione; label: string; icon: string }[] = [
@@ -27,12 +27,10 @@ const TIPO_OPTIONS: { value: TipoRestrizione; label: string; icon: string }[] = 
   { value: 'LIMITE_VELOCITA', label: 'Limite Velocità', icon: 'speedometer-outline' },
 ];
 
-// 'scooter' nel DB = monopattino elettrico
 const VEHICLE_OPTIONS: { type: VehicleType; label: string; icon: string }[] = [
-  { type: 'scooter', label: 'Monopattino', icon: 'speedometer-outline' },
-  { type: 'bike',    label: 'Bici',        icon: 'bicycle-outline' },
-  { type: 'ebike',   label: 'E-Bike',      icon: 'flash-outline' },
-  { type: 'car',     label: 'Auto',        icon: 'car-outline' },
+  { type: 'scooter', label: 'Monopattino Elettrico', icon: 'speedometer-outline' },
+  { type: 'ebike',   label: 'Bici Elettrica',        icon: 'bicycle-outline' },
+  { type: 'car',     label: 'Auto Elettrica',         icon: 'car-outline' },
 ];
 
 // ─── Helper date ─────────────────────────────────────────────────────────────

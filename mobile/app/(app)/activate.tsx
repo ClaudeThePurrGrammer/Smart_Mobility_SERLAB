@@ -181,20 +181,25 @@ export default function ActivateScreen() {
     const input = (rawCode ?? codeRef.current ?? code).trim();
     const match = input.match(/\d+/);
     if (!match) {
-      setError('Codice non valido — usa il formato SM-42 o digita solo il numero.');
-      scannedRef.current = false;
+      // scannedRef resta true → la fotocamera non rilancia finché l'utente non tocca "Scansiona di nuovo"
+      setError('QR non riconosciuto. Inquadra il codice stampato sul mezzo.');
       return;
     }
     const vid = Number(match[0]);
+
+    // Mezzo specifico selezionato in precedenza → accetta solo il suo codice
+    if (expectedVehicleId !== null && vid !== expectedVehicleId) {
+      setError(`Codice errato: hai scansionato SM-${vid}, ma il mezzo selezionato è SM-${expectedVehicleId}.`);
+      return; // scannedRef resta true → nessun loop, utente tocca "Scansiona di nuovo"
+    }
 
     validatingRef.current = true;
     setValidating(true);
     setError(null);
     try {
       const v = await vehiclesApi.get(vid);
-      if (v.status !== 'available') {
+      if (v.status !== 'parked' || v.locked) {
         setError(`Il mezzo SM-${vid} non è disponibile al momento.`);
-        scannedRef.current = false;
         return;
       }
       setValidatedVehicle(v);
@@ -205,7 +210,7 @@ export default function ActivateScreen() {
       } else {
         setError('Impossibile verificare il codice. Riprova tra qualche secondo.');
       }
-      scannedRef.current = false;
+      // scannedRef resta true — il pulsante "Scansiona di nuovo" resetterà il guard
     } finally {
       validatingRef.current = false;
       setValidating(false);
@@ -516,12 +521,14 @@ export default function ActivateScreen() {
           </View>
           <Text style={styles.manualTitle}>Codice del mezzo</Text>
           <Text style={styles.manualSub}>
-            Inserisci il codice (formato SM-XX) stampato sul mezzo o sulla targhetta QR.
+            {expectedVehicleId !== null
+              ? `Devi inserire il codice SM-${expectedVehicleId} stampato su questo mezzo.`
+              : 'Inserisci il codice (formato SM-XX) stampato sul mezzo o sulla targhetta QR.'}
           </Text>
 
           <TextInput
             style={styles.codeInput}
-            placeholder="SM-42"
+            placeholder={expectedVehicleId !== null ? `SM-${expectedVehicleId}` : 'SM-42'}
             placeholderTextColor={Colors.muted}
             value={code}
             onChangeText={(t) => {
@@ -617,7 +624,7 @@ export default function ActivateScreen() {
       <CameraView
         style={StyleSheet.absoluteFillObject}
         facing="back"
-        onBarcodeScanned={(scannedRef.current || validatingRef.current) ? undefined : handleScanned}
+        onBarcodeScanned={handleScanned}
         barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
       />
 
@@ -630,6 +637,18 @@ export default function ActivateScreen() {
           <View style={{ width: 38 }} />
         </View>
 
+
+        {/* Hint bar: mostra il mezzo richiesto (vincolante) oppure istruzione generica */}
+        <View style={styles.vehicleHintBar}>
+          <Ionicons name="qr-code-outline" size={16} color={Colors.accent} />
+          <Text style={styles.vehicleHintText}>
+            {expectedVehicleId !== null
+              ? <>Scansiona il QR del mezzo{' '}
+                  <Text style={{ fontWeight: '800', color: Colors.accent }}>SM-{expectedVehicleId}</Text>
+                </>
+              : 'Scansiona il QR di qualsiasi mezzo disponibile'}
+          </Text>
+        </View>
 
         <View style={styles.overlayMiddle}>
           <View style={styles.overlaySide} />

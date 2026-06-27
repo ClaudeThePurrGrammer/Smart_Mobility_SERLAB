@@ -75,6 +75,11 @@ class UserSelfUpdate(BaseModel):
 
 
 # ─── Vehicles ───────────────────────────────────────────────────────────────
+class ParkVehicleIn(BaseModel):
+    """Input per parcheggiare un mezzo in un'area specifica."""
+    parking_area_id: int
+
+
 class VehicleOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int

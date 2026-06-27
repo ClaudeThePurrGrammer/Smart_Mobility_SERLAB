@@ -154,10 +154,19 @@ function Flotta() {
               <tr key={v.id}>
                 <td>{v.name}<br /><span className="muted" style={{ fontSize: 12 }}>{v.model}</span></td>
                 <td>{v.battery_pct}%</td>
-                <td>{v.locked ? <span className="pill bloccato">BLOCCATO</span> : v.status}</td>
                 <td>
-                  <button className={v.locked ? 'btn-success btn-sm' : 'btn-danger btn-sm'}
-                    onClick={() => toggleBlocco(v)} disabled={v.status === 'in_use' && !v.locked}>
+                  {v.locked
+                    ? <span className="pill bloccato">BLOCCATO</span>
+                    : v.status === 'in_use'
+                      ? <span className="pill attivo">IN USO</span>
+                      : <span className="pill attivo" style={{ background: 'rgba(16,185,129,0.15)', color: '#10B981', borderColor: 'rgba(16,185,129,0.4)' }}>LIBERO</span>
+                  }
+                </td>
+                <td>
+                  <button
+                    className={v.locked ? 'btn-success btn-sm' : 'btn-danger btn-sm'}
+                    onClick={() => toggleBlocco(v)}
+                  >
                     {v.locked ? 'Sblocca' : 'Blocca'}
                   </button>
                 </td>

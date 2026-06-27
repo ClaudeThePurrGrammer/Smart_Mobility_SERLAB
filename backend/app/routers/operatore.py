@@ -32,7 +32,7 @@ def segnalazioni_mezzi(db: Session = Depends(get_db)):
     Il filtro è imposto lato backend — il frontend non può modificarlo."""
     items = (
         db.query(Segnalazione)
-        .filter(Segnalazione.stato == "APERTA", Segnalazione.tipo != "PERCORSO")
+        .filter(Segnalazione.stato == "APERTA", Segnalazione.tipo == "MALFUNZIONAMENTO")
         .all()
     )
     items.sort(key=lambda s: (_GRAVITA_ORD.get(s.gravita, 1), -s.id))
@@ -48,13 +48,18 @@ def flotta(db: Session = Depends(get_db)):
 @router.get("/mezzi-rilascio", response_model=list[VehicleOut])
 def mezzi_rilascio(db: Session = Depends(get_db)):
     """OP.04 — Posizione dei mezzi a fine corsa (mezzi liberi sulla mappa)."""
-    return db.query(Vehicle).filter(Vehicle.status == "available").order_by(Vehicle.id).all()
+    return (
+        db.query(Vehicle)
+        .filter(Vehicle.status == "parked", Vehicle.locked == False)  # noqa: E712
+        .order_by(Vehicle.id)
+        .all()
+    )
 
 
 @router.get("/aree-densita")
 def aree_densita(db: Session = Depends(get_db)):
     """OP.02 — Densità mezzi disponibili per area di sosta, con livello di disponibilità."""
-    vehicles = db.query(Vehicle).filter(Vehicle.status == "available").all()
+    vehicles = db.query(Vehicle).filter(Vehicle.status == "parked", Vehicle.locked == False).all()  # noqa: E712
     aree = db.query(ParkingArea).all()
     out = []
     for a in aree:
@@ -155,15 +160,15 @@ def blocco_remoto(
             ))
 
         v.locked = True
-        v.status = "maintenance"
+        v.status = "parked"  # rimane in area ma non prelevabile (locked=True lo blocca)
         azione = "BLOCCO_REMOTO_MEZZO"
         dettaglio = f"vehicle_id={vehicle_id}"
         if ride_interrotta_id:
             dettaglio += f", ride_id={ride_interrotta_id} interrotta"
     else:
-        # Sblocco: il mezzo torna disponibile, nessuna corsa viene ripristinata.
+        # Sblocco: il mezzo torna parcheggiato e prelevabile dagli utenti.
         v.locked = False
-        v.status = "available"
+        v.status = "parked"
         azione = "SBLOCCO_REMOTO_MEZZO"
         dettaglio = f"vehicle_id={vehicle_id}"
 

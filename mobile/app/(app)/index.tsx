@@ -326,15 +326,22 @@ export default function HomeScreen() {
         />
         {vehicles.map(v => {
           const isSelected = selectedVehicle?.id === v.id;
+          const isParked   = v.status === 'parked';
           return (
             <Marker
               key={v.id}
               coordinate={{ latitude: v.lat, longitude: v.lng }}
               onPress={(e) => { e.stopPropagation?.(); setSelectedVehicle(v); }}
             >
-              <View style={[styles.marker, isSelected && styles.markerSelected]}>
-                <MaterialCommunityIcons name={vehicleIcon[v.type] as any} size={18} color={isSelected ? Colors.text : Colors.accent} />
-              </View>
+              {isParked ? (
+                <View style={[styles.markerParked, isSelected && styles.markerParkedSelected]}>
+                  <MaterialCommunityIcons name={vehicleIcon[v.type] as any} size={15} color={isSelected ? Colors.text : Colors.success} />
+                </View>
+              ) : (
+                <View style={[styles.marker, isSelected && styles.markerSelected]}>
+                  <MaterialCommunityIcons name={vehicleIcon[v.type] as any} size={18} color={isSelected ? Colors.text : Colors.accent} />
+                </View>
+              )}
             </Marker>
           );
         })}
@@ -565,7 +572,7 @@ export default function HomeScreen() {
 
           {/* QR button */}
           <Animated.View style={[styles.qrBtn, { transform: [{ scale: qrBtn.scale }] }]}>
-            <TouchableOpacity onPress={() => router.push('/(app)/scan')} onPressIn={qrBtn.onPressIn} onPressOut={qrBtn.onPressOut} activeOpacity={1} style={{ borderRadius: 16, overflow: 'hidden' }}>
+            <TouchableOpacity onPress={() => router.push('/(app)/activate')} onPressIn={qrBtn.onPressIn} onPressOut={qrBtn.onPressOut} activeOpacity={1} style={{ borderRadius: 16, overflow: 'hidden' }}>
               <LinearGradient colors={Gradients.primaryBtn} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.qrBtnGradient}>
                 <MaterialCommunityIcons name="qrcode" size={22} color={Colors.text} />
                 <Text style={styles.qrBtnText}>Scansiona per iniziare</Text>
@@ -737,8 +744,10 @@ const styles = StyleSheet.create({
   qrBtn:             { borderRadius: 16, marginHorizontal: 4 },
   qrBtnGradient:     { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 13 },
   qrBtnText:         { color: Colors.text, fontSize: 16, fontWeight: '700' },
-  marker:            { backgroundColor: 'rgba(13,13,26,0.85)', borderWidth: 1.5, borderColor: Colors.primary, borderRadius: 10, padding: 6 },
-  markerSelected:    { backgroundColor: Colors.primary, borderColor: Colors.accent, transform: [{ scale: 1.15 }] },
+  marker:              { backgroundColor: 'rgba(13,13,26,0.85)', borderWidth: 1.5, borderColor: Colors.primary, borderRadius: 10, padding: 6 },
+  markerSelected:      { backgroundColor: Colors.primary, borderColor: Colors.accent, transform: [{ scale: 1.15 }] },
+  markerParked:        { backgroundColor: 'rgba(13,13,26,0.85)', borderWidth: 1.5, borderColor: '#10B981', borderRadius: 8, padding: 5 },
+  markerParkedSelected:{ backgroundColor: '#10B981', borderColor: '#34D399', transform: [{ scale: 1.15 }] },
   parkingMarker:     { backgroundColor: 'rgba(16,185,129,0.85)', borderWidth: 1.5, borderColor: '#10b981', borderRadius: 8, width: 22, height: 22, alignItems: 'center', justifyContent: 'center' },
   parkingMarkerText: { color: '#fff', fontSize: 11, fontWeight: '800' },
 

@@ -34,6 +34,17 @@ TYPES = [
     ("car",     "E-Car C4",   "SUV EV",     2.20, 0.38),
 ]
 
+def rand_coord_in_area(lat: float, lng: float, radius_m: int) -> tuple[float, float]:
+    """Coordinate casuali all'interno di un'area circolare (raggio in metri)."""
+    radius_deg = (radius_m * 0.85) / 111_000  # 85% del raggio per stare ben dentro
+    angle = random.uniform(0, 2 * math.pi)
+    dist  = random.uniform(0, radius_deg)
+    return (
+        round(lat + dist * math.cos(angle), 6),
+        round(lng + dist * math.sin(angle), 6),
+    )
+
+
 def rand_coord(center, radius_km=2.5):
     r = radius_km / 111.0
     angle = random.uniform(0, 2 * math.pi)
@@ -127,7 +138,7 @@ def cleanup_orphans(db: Session) -> None:
         if r.vehicle_id:
             v = db.get(Vehicle, r.vehicle_id)
             if v and v.status == "in_use":
-                v.status = "available"
+                v.status = "parked"  # rimette il mezzo in stato prelevabile
     db.commit()
     print(f"[cleanup] Chiuse {len(orphans)} corse orfane.")
 
@@ -171,7 +182,7 @@ def ensure_parking_areas(db: Session) -> None:
     multi-città (60 aree su 11 città pugliesi). Idempotente: se ≥ 55 aree
     esistono già non fa nulla.
     """
-    if db.query(ParkingArea).count() >= 55:
+    if db.query(ParkingArea).count() >= 70:
         return
     # Svuota eventuali aree vecchie (nessuna FK esterna punta a parking_areas).
     db.query(ParkingArea).delete()
@@ -191,6 +202,17 @@ def ensure_parking_areas(db: Session) -> None:
         ("Sosta Piazza Umberto I",         "Piazza Umberto I",          41.1250, 16.8683, 60, 22,  7),
         ("Hub Parco 2 Giugno",             "Viale Luigi Jacobini",      41.1060, 16.8730, 75, 30,  6),
         ("Sosta Borgo Antico",             "Via Venezia",               41.1280, 16.8680, 55, 18,  4),
+        # Bari — aree aggiuntive per maggiore copertura
+        ("Hub Corso Italia Bari",          "Corso Italia",              41.1195, 16.8640, 60, 20,  5),
+        ("Sosta Via Amendola",             "Via Giulio Cesare Amendola",41.1135, 16.8755, 55, 18,  3),
+        ("Parcheggio Via Napoli",          "Via Napoli",                41.1090, 16.8655, 65, 22,  6),
+        ("Hub Japigia",                    "Via Fanelli",               41.0990, 16.8720, 70, 25,  4),
+        ("Sosta Quartiere Libertà",        "Via Quintino Sella",        41.1150, 16.8620, 55, 18,  2),
+        ("Hub Via Casamassima",            "Via Casamassima",           41.1020, 16.8780, 60, 20,  5),
+        ("Sosta Carbonara",                "Via Valenzano",             41.0930, 16.8850, 50, 16,  3),
+        ("Parcheggio Torre a Mare",        "Via Lungomare Torre",       41.0750, 16.9000, 65, 22,  0),
+        ("Hub Loseto",                     "Via Loseto",                41.0860, 16.8640, 55, 18,  4),
+        ("Sosta Palese",                   "Via Triggiano",             41.1330, 16.8010, 60, 20,  0),
 
         # ── FOGGIA ────────────────────────────────────────────────────────────
         ("Hub Piazza Cavour Foggia",       "Piazza Cavour",             41.4628, 15.5445, 70, 25,  5),
@@ -301,14 +323,23 @@ def ensure_electric_cars(db: Session) -> None:
         return
     to_add = 12 - existing
     car_types = [t for t in TYPES if t[0] == "car"]
+    bari_areas = (
+        db.query(ParkingArea)
+        .filter(ParkingArea.lat >= 41.05, ParkingArea.lat <= 41.17)
+        .all()
+    )
     added = 0
     for i in range(to_add):
         vtype, name, model, fee, ppm = car_types[i % len(car_types)]
-        coord = rand_land_coord()
-        if coord is None:
-            print(f"[ensure_electric_cars][warn] Nessuna coordinata valida per {name}.")
-            continue
-        lat, lng = coord
+        if bari_areas:
+            area = bari_areas[i % len(bari_areas)]
+            lat, lng = rand_coord_in_area(area.lat, area.lng, area.radius_m)
+        else:
+            coord = rand_land_coord()
+            if coord is None:
+                print(f"[ensure_electric_cars][warn] Nessuna coordinata valida per {name}.")
+                continue
+            lat, lng = coord
         db.add(Vehicle(
             name=f"{name}-{existing + i + 1:02d}",
             model=model,
@@ -316,7 +347,7 @@ def ensure_electric_cars(db: Session) -> None:
             lat=lat,
             lng=lng,
             battery_pct=random.randint(45, 100),
-            status="available",
+            status="parked",
             unlock_fee=fee,
             price_per_min=ppm,
         ))
@@ -351,18 +382,34 @@ def reset_and_reseed(db: Session) -> None:
 
 
 def seed(db: Session) -> None:
-    # Prima di tutto: riporta a terra eventuali veicoli già nel DB finiti in mare.
+    # 1. Aree di parcheggio prima: i veicoli vengono piazzati dentro di esse.
+    ensure_parking_areas(db)
+
+    # 2. Riporta a terra veicoli già presenti finiti in mare (se DB non vuoto).
     fix_sea_vehicles(db)
 
     if db.query(Vehicle).count() == 0:
-        for i in range(40):
+        # Recupera TUTTE le aree di Bari (lat 40.9–41.17) per distribuire i veicoli.
+        bari_areas = (
+            db.query(ParkingArea)
+            .filter(ParkingArea.lat >= 40.90, ParkingArea.lat <= 41.17)
+            .all()
+        )
+        # Seed con 60 veicoli: ciclicamente su tutte le aree Bari così più aree sono popolate.
+        NUM_SEED = 60
+        for i in range(NUM_SEED):
             vtype, name, model, fee, ppm = TYPES[i % len(TYPES)]
-            coord = rand_land_coord()
-            if coord is None:
-                print(f"[seed][warn] Nessuna coordinata valida (on land) trovata dopo "
-                      f"{MAX_COORD_ATTEMPTS} tentativi per il veicolo {name}-{i+1:02d}: saltato.")
-                continue
-            lat, lng = coord
+            if bari_areas:
+                # Shuffled index: evita che i tipi siano sempre nello stesso slot per area
+                area = bari_areas[i % len(bari_areas)]
+                lat, lng = rand_coord_in_area(area.lat, area.lng, area.radius_m)
+            else:
+                # Fallback: coordinate casuali su terraferma
+                coord = rand_land_coord()
+                if coord is None:
+                    print(f"[seed][warn] Nessuna coordinata valida per {name}-{i+1:02d}: saltato.")
+                    continue
+                lat, lng = coord
             db.add(Vehicle(
                 name=f"{name}-{i+1:02d}",
                 model=model,
@@ -370,15 +417,23 @@ def seed(db: Session) -> None:
                 lat=lat,
                 lng=lng,
                 battery_pct=random.randint(30, 100),
-                status="available",
+                status="parked",
                 unlock_fee=fee,
                 price_per_min=ppm,
             ))
         db.commit()
+        # Aggiorna il contatore "occupied" delle aree Bari
+        if bari_areas:
+            for area in bari_areas:
+                n = db.query(Vehicle).filter(
+                    Vehicle.lat.between(area.lat - 0.001, area.lat + 0.001),
+                    Vehicle.lng.between(area.lng - 0.001, area.lng + 0.001),
+                ).count()
+                area.occupied = min(n, area.capacity)
+            db.commit()
+        print(f"[seed] {NUM_SEED} veicoli parcheggiati nelle aree di Bari ({len(bari_areas)} aree).")
 
     ensure_electric_cars(db)
-
-    ensure_parking_areas(db)
 
     if db.query(Promotion).count() == 0:
         for p in PROMOTIONS:

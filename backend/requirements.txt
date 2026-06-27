@@ -8,3 +8,6 @@ python-jose[cryptography]==3.3.0
 pydantic[email]==2.10.4
 google-auth==2.37.0
 alembic==1.14.0
+reportlab==4.2.5
+qrcode[pil]==8.0
+Pillow==11.2.1

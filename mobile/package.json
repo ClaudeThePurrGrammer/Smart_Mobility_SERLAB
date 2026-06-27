@@ -3,10 +3,11 @@
   "version": "1.0.0",
   "main": "expo-router/entry",
   "scripts": {
-    "start": "expo start",
-    "go": "expo start --go",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "start": "expo start --clear",
+    "go": "expo start --clear",
+    "android": "expo start --android --clear",
+    "android-tunnel": "expo start --android --tunnel",
+    "ios": "expo start --ios --clear",
     "web": "expo start --web"
   },
   "dependencies": {

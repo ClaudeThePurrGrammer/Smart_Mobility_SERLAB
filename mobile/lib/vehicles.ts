@@ -14,6 +14,7 @@ export interface MapVehicle {
   lat: number;
   lng: number;
   batteryPct: number;
+  status: string;   // 'available' | 'parked' | 'in_use' | 'reserved' | 'maintenance'
 }
 
 /** Coordinate ereditate dai MOCK_VEHICLES originali della home (zona Bari). */
@@ -27,7 +28,8 @@ export const MAP_VEHICLES: MapVehicle[] = [
 
 /** Converte un mezzo proveniente dal Controller (snake_case, id numerico) in MapVehicle. */
 export function toMapVehicle(v: {
-  id: number; name: string; model: string; type: string; lat: number; lng: number; battery_pct: number;
+  id: number; name: string; model: string; type: string; lat: number; lng: number;
+  battery_pct: number; status: string;
 }): MapVehicle {
   return {
     id: String(v.id),
@@ -37,6 +39,7 @@ export function toMapVehicle(v: {
     lat: v.lat,
     lng: v.lng,
     batteryPct: v.battery_pct,
+    status: v.status,
   };
 }
 

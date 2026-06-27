@@ -36,6 +36,12 @@ export const vehiclesApi = {
     return apiFetch<ApiVehicle[]>(url);
   },
   get: (id: number) => apiFetch<ApiVehicle>(`/vehicles/${id}`),
+  park: (token: string, vehicleId: number, parkingAreaId: number) =>
+    apiFetch<ApiVehicle>(`/vehicles/${vehicleId}/park`, {
+      method: 'PATCH',
+      body: { parking_area_id: parkingAreaId },
+      token,
+    }),
 };
 
 // ─── Parking areas ─────────────────────────────────────────────────────────

@@ -12,7 +12,7 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Colors, Gradients } from '@/constants/theme';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { useRideSession } from '@/lib/ride/RideSessionContext';
-import { paymentApi, promotionsApi, reportsApi } from '@/lib/api/endpoints';
+import { paymentApi, promotionsApi, reportsApi, vehiclesApi } from '@/lib/api/endpoints';
 import type { ApiPaymentMethod, ApiPromotion } from '@/lib/api/types';
 
 // ── Icone ────────────────────────────────────────────────────────────────────
@@ -48,8 +48,8 @@ function extractDiscount(reward: string, base: number): number {
 }
 
 export default function RidePaymentScreen() {
-  const { token }      = useAuth();
-  const { endSession } = useRideSession();
+  const { token }             = useAuth();
+  const { endSession, session } = useRideSession();
   const params = useLocalSearchParams<{
     cost?: string; km?: string; minutes?: string; points?: string;
     vehicleType?: string; areaId?: string; areaName?: string;
@@ -188,6 +188,11 @@ export default function RidePaymentScreen() {
       }
       // [Simulazione] In produzione qui avverrebbe la chiamata al gateway di pagamento.
       await new Promise(r => setTimeout(r, 1200));
+
+      // Parcheggia il veicolo nell'area selezionata (aggiorna posizione + status → 'parked').
+      if (token && session?.vehicleId && params.areaId) {
+        await vehiclesApi.park(token, session.vehicleId, Number(params.areaId)).catch(() => {});
+      }
 
       // Chiude la sessione corsa → sblocca navigazione.
       endSession();

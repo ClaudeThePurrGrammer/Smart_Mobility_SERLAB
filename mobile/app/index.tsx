@@ -63,7 +63,14 @@ export default function SplashScreen() {
   useEffect(() => {
     if (initializing || navigated.current) return;
     navigated.current = true;
-    const t = setTimeout(() => router.replace(user ? '/(app)' : '/(auth)/login'), 2400);
+    const dest = !user
+      ? '/(auth)/login'
+      : user.role === 'AMMINISTRAZIONE'
+        ? ('/(admin)' as any)
+        : user.role === 'OPERATORE'
+          ? ('/(operatore)' as any)
+          : '/(app)';
+    const t = setTimeout(() => router.replace(dest), 2400);
     return () => clearTimeout(t);
   }, [initializing, user]);
 

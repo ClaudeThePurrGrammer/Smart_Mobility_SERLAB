@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import get_current_user
-from ..models import Reservation, User, Vehicle
+from ..models import Reservation, Ride, User, Vehicle
 
 router = APIRouter(prefix="/prenotazioni", tags=["prenotazioni"])
 RESERVATION_DURATION = timedelta(minutes=10)
@@ -73,7 +73,19 @@ def create(body: ReservationCreate, user: User = Depends(get_current_user), db: 
     if not vehicle:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Mezzo non trovato.")
     if vehicle.status != "available":
-        raise HTTPException(status.HTTP_409_CONFLICT, "Il mezzo non è disponibile.")
+        # Se il mezzo è in_use ma non esiste una corsa attiva che lo usa,
+        # si tratta di uno stato orfano (es. crash o ride non chiusa correttamente).
+        # Lo resettiamo automaticamente anziché bloccare la prenotazione.
+        active_ride = (
+            db.query(Ride)
+            .filter(Ride.vehicle_id == body.id_mezzo, Ride.status.in_(("active", "paused")))
+            .first()
+        )
+        if active_ride:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Il mezzo è in uso da un altro utente.")
+        # Reset stato orfano
+        vehicle.status = "available"
+        db.commit()
     res = Reservation(
         user_id=user.id,
         vehicle_id=body.id_mezzo,

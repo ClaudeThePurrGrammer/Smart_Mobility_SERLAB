@@ -4,7 +4,7 @@ import { View } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '@/constants/theme';
 import { RideSessionProvider, useRideSession } from '@/lib/ride/RideSessionContext';
-import { ReservationSessionProvider } from '@/lib/reservation/ReservationSessionContext';
+import { ReservationSessionProvider, useReservationSession } from '@/lib/reservation/ReservationSessionContext';
 import { SearchProvider } from '@/lib/search/SearchContext';
 
 // Schermate raggiungibili durante una corsa attiva: il flusso di uscita
@@ -14,7 +14,9 @@ import { SearchProvider } from '@/lib/search/SearchContext';
 // active-ride completi la navigazione: senza questo, il guard ridirigerebbe a
 // active-ride senza i params (rideId = undefined) → handleEndRide non chiude
 // la corsa → corsa "stuck" sul backend → loop al prossimo caricamento.
-const RIDE_LOCKED_ALLOWED = ['/active-ride', '/end-ride', '/active-reservation'];
+// '/report' è incluso: durante la corsa l'utente può aprire la schermata
+// di segnalazione senza essere rediretto ad active-ride dal guard.
+const RIDE_LOCKED_ALLOWED = ['/active-ride', '/end-ride', '/active-reservation', '/report', '/reports-history', '/ride-payment', '/payment'];
 
 function TabIcon({ name, color, focused }: { name: any; color: string; focused: boolean }) {
   return (
@@ -73,6 +75,9 @@ export default function AppLayout() {
 
 function AppTabs() {
   const { session } = useRideSession();
+  const { reservation } = useReservationSession();
+  // Tab bloccate sia con corsa attiva sia con prenotazione attiva.
+  const isLocked = session !== null || reservation !== null;
   const pathname = usePathname();
   const navState = useRootNavigationState();
   // navState?.key è truthy già al primo mount (root container pronto), ma il
@@ -85,17 +90,30 @@ function AppTabs() {
 
   useEffect(() => {
     if (!tabsReady) return;
-    if (session && !RIDE_LOCKED_ALLOWED.includes(pathname)) {
-      router.replace('/(app)/active-ride');
+    if (isLocked && !RIDE_LOCKED_ALLOWED.includes(pathname)) {
+      // PROBLEMA B: passare i params dalla sessione evita la race con il
+      // router.replace del chiamante (active-ride senza rideId → loop).
+      if (session !== null) {
+        router.replace({
+          pathname: '/(app)/active-ride',
+          params: {
+            rideId: String(session.rideId),
+            vehicleId: String(session.vehicleId),
+          },
+        });
+      } else if (reservation !== null) {
+        // active-reservation legge i propri dati da params/context: nessun param qui.
+        router.replace('/(app)/active-reservation');
+      }
     }
-  }, [session, pathname, tabsReady]);
+  }, [session, reservation, isLocked, pathname, tabsReady]);
 
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        // Durante la corsa la tab bar è completamente nascosta.
-        tabBarStyle: session
+        // Durante corsa o prenotazione attiva la tab bar è completamente nascosta.
+        tabBarStyle: isLocked
           ? { display: 'none' }
           : {
               backgroundColor: Colors.card,
@@ -188,6 +206,9 @@ function AppTabs() {
       <Tabs.Screen name="vehicle-action"      options={{ href: null }} />
       <Tabs.Screen name="activate"            options={{ href: null }} />
       <Tabs.Screen name="active-reservation"  options={{ href: null }} />
+      <Tabs.Screen name="reports-history"     options={{ href: null }} />
+      <Tabs.Screen name="ride-payment"        options={{ href: null }} />
+      <Tabs.Screen name="payment-receipt"    options={{ href: null }} />
     </Tabs>
   );
 }

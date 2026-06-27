@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, Image } from 'react-native';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/theme';
 
-export type VehicleType = 'scooter' | 'bike' | 'ebike' | 'car';
+export type VehicleType = 'scooter' | 'ebike' | 'car';
 
 export interface Vehicle {
   id: string;
@@ -26,7 +26,6 @@ interface Props {
 
 const typeIcon: Record<VehicleType, keyof typeof MaterialCommunityIcons.glyphMap> = {
   scooter: 'scooter',
-  bike:    'bicycle',
   ebike:   'bicycle-electric',
   car:     'car-electric',
 };

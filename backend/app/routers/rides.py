@@ -14,6 +14,7 @@ router = APIRouter(prefix="/rides", tags=["rides"])
 POINTS_PER_RIDE = 10
 ECO_BONUS_KM = 2.0
 ECO_BONUS_POINTS = 5
+SUPPORTED_VEHICLE_TYPES = {"scooter", "ebike", "car"}
 
 
 @router.get("", response_model=list[RideOut])
@@ -52,9 +53,13 @@ def start_ride(data: RideCreate, user: User = Depends(get_current_user), db: Ses
 
     vehicle = db.get(Vehicle, data.vehicle_id) if data.vehicle_id else None
     if vehicle:
+        if vehicle.type not in SUPPORTED_VEHICLE_TYPES:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Mezzo non trovato")
         if vehicle.status != "available":
             raise HTTPException(status.HTTP_409_CONFLICT, "Mezzo non disponibile")
         vehicle.status = "in_use"
+    elif data.vehicle_type not in SUPPORTED_VEHICLE_TYPES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tipo mezzo non supportato")
 
     ride = Ride(
         user_id=user.id,

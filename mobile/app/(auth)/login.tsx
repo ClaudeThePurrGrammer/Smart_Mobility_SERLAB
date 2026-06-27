@@ -28,8 +28,9 @@ export default function LoginScreen() {
     setError(null);
     setLoading(true);
     try {
-      await login(email.trim(), password);
-      router.replace('/(app)');
+      const u = await login(email.trim(), password);
+      const dest = u.role === 'AMMINISTRAZIONE' ? '/(admin)' : u.role === 'OPERATORE' ? '/(operatore)' : '/(app)';
+      router.replace(dest as any);
     } catch (e: any) {
       setError(e?.message ?? 'Accesso non riuscito.');
     } finally {

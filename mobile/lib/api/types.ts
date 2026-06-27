@@ -10,6 +10,18 @@ export interface ApiUser {
   points: number;
   balance: number;
   notifications_enabled: boolean;
+  role: string;
+  created_at: string;
+}
+
+export interface ApiUserAdmin {
+  id: number;
+  name: string;
+  surname: string;
+  email: string;
+  role: string;
+  account_status: 'ATTIVO' | 'SOSPESO' | 'BLOCCATO';
+  points: number;
   created_at: string;
 }
 
@@ -23,13 +35,14 @@ export interface ApiVehicle {
   id: number;
   name: string;
   model: string;
-  type: 'scooter' | 'bike' | 'ebike' | 'car';
+  type: 'scooter' | 'ebike' | 'car';
   lat: number;
   lng: number;
   battery_pct: number;
   status: string;
   unlock_fee: number;
   price_per_min: number;
+  locked: boolean;
 }
 
 export interface ApiParkingArea {
@@ -109,6 +122,9 @@ export interface ApiReport {
   category: string;
   description: string;
   status: string;
+  tipo?: string;
+  gravita?: string;
+  attachments?: string[];
   created_at: string;
 }
 
@@ -136,6 +152,69 @@ export interface ApiReservation {
   ora_scadenza: string;
   stato: string;
   mezzo: ApiReservationVehicle | null;
+}
+
+export interface ApiSegnalazione {
+  id: number;
+  user_id: number;
+  ride_id: number | null;
+  category: string;
+  description: string;
+  tipo: string;
+  gravita: 'BASSA' | 'MEDIA' | 'ALTA';
+  stato: string;
+  gps_lat: number | null;
+  gps_lng: number | null;
+  zona: string | null;
+  created_at: string;
+  closed_at: string | null;
+}
+
+export interface ApiMonitoraggioFrequenza {
+  tipo: string;
+  da: string | null;
+  a: string | null;
+  totale_corse: number;
+}
+
+export interface ApiTrattaFrequenza {
+  from_addr: string;
+  to_addr: string;
+  corse: number;
+}
+
+export interface ApiReportMobilita {
+  tipo: string;
+  da: string | null;
+  a: string | null;
+  totale_corse: number;
+  tratte: ApiTrattaFrequenza[];
+}
+
+export interface ApiAreaRestrizioneOut {
+  id: number;
+  nome: string;
+  tipo: string;
+  lat: number;
+  lng: number;
+  radius_m: number;
+  vehicle_types: string[];
+  orario: string | null;
+  attiva: boolean;
+  note: string;
+  valida_dal: string | null;
+  valida_al: string | null;
+}
+
+export interface ApiSegnalazioneZona {
+  id: number;
+  zona: string | null;
+  descrizione: string;
+  valida_dal: string | null;
+  valida_al: string | null;
+  gps_lat: number | null;
+  gps_lng: number | null;
+  created_at: string;
 }
 
 export interface ApiGeocodeResult {

@@ -12,7 +12,6 @@ type Filter = 'Tutte' | 'Questo mese' | 'Precedenti';
 
 const VEHICLE_ICON: Record<string, string> = {
   scooter: 'scooter',
-  bike: 'bicycle',
   ebike: 'bicycle-electric',
   car: 'car-electric',
 };
@@ -108,7 +107,7 @@ export default function RideHistoryScreen() {
         ) : filtered.map((ride, idx) => (
           <TouchableOpacity key={ride.id} style={[styles.rideCard, idx === 0 && { marginTop: 16 }]}>
             <View style={styles.rideIcon}>
-              <MaterialCommunityIcons name={(VEHICLE_ICON[ride.vehicle_type] ?? 'bicycle') as any} size={24} color={Colors.accent} />
+              <MaterialCommunityIcons name={(VEHICLE_ICON[ride.vehicle_type] ?? 'car-electric') as any} size={24} color={Colors.accent} />
             </View>
             <View style={styles.rideInfo}>
               <Text style={styles.rideDate}>{shortDateTime(ride.started_at)}</Text>

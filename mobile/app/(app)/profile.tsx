@@ -24,6 +24,7 @@ const SECTIONS = [
     items: [
       { icon: 'card-outline',       label: 'Metodi di pagamento',  onPress: () => router.push('/(app)/payment') },
       { icon: 'time-outline',       label: 'Storico corse',        onPress: () => router.push('/(app)/ride-history') },
+      { icon: 'megaphone-outline',  label: 'Le mie segnalazioni',  onPress: () => router.push('/(app)/reports-history') },
       { icon: 'gift-outline',       label: 'Promozioni e bonus',   onPress: () => router.push('/(app)/promotions') },
       { icon: 'star-outline',       label: 'Programma fedeltà',    onPress: () => router.push('/(app)/loyalty') },
     ],
@@ -96,10 +97,6 @@ export default function ProfileScreen() {
         <Text style={styles.email}>{user?.email ?? ''}</Text>
         <Text style={styles.since}>{user ? `Membro da ${memberSince(user.created_at)}` : ''}</Text>
 
-        <TouchableOpacity style={styles.editBtn}>
-          <Ionicons name="pencil-outline" size={14} color={Colors.accent} />
-          <Text style={styles.editBtnText}>Modifica profilo</Text>
-        </TouchableOpacity>
       </LinearGradient>
 
       {/* Stats */}

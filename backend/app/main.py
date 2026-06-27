@@ -10,7 +10,7 @@ from .routers import (
     amministrazione, auth, geo, messages, operatore, parking, payment, promotions,
     realtime, reports, reservations, restrizioni, rides, segnalazioni, users, vehicles, wallet,
 )
-from .seed import cleanup_orphans, seed
+from .seed import cleanup_orphans, ensure_parking_areas, seed
 
 
 def _ensure_schema() -> None:
@@ -25,6 +25,12 @@ def _ensure_schema() -> None:
         "ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS locked BOOLEAN DEFAULT FALSE",
         "ALTER TABLE rides ADD COLUMN IF NOT EXISTS orario_inizio_pausa TIMESTAMP WITH TIME ZONE",
         "ALTER TABLE rides ADD COLUMN IF NOT EXISTS pausa_secondi_accumulati INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE segnalazioni ADD COLUMN IF NOT EXISTS attachments JSON DEFAULT '[]'::json",
+        "ALTER TABLE segnalazioni ADD COLUMN IF NOT EXISTS zona VARCHAR(200)",
+        "ALTER TABLE segnalazioni ADD COLUMN IF NOT EXISTS valida_dal DATE",
+        "ALTER TABLE segnalazioni ADD COLUMN IF NOT EXISTS valida_al DATE",
+        "ALTER TABLE aree_restrizione ADD COLUMN IF NOT EXISTS valida_dal DATE",
+        "ALTER TABLE aree_restrizione ADD COLUMN IF NOT EXISTS valida_al DATE",
     ]
     with engine.begin() as conn:
         for stmt in stmts:
@@ -37,8 +43,9 @@ async def lifespan(_app: FastAPI):
     Base.metadata.create_all(bind=engine)
     _ensure_schema()
     with SessionLocal() as db:
-        cleanup_orphans(db)   # chiude corse orfane prima di ogni altra operazione
+        cleanup_orphans(db)           # chiude corse orfane prima di ogni altra operazione
         seed(db)
+        ensure_parking_areas(db)      # aggiorna aree se DB esistente ha il vecchio set
     yield
 
 

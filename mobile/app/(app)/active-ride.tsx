@@ -6,7 +6,8 @@ import { StatusBar } from 'expo-status-bar';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Colors } from '@/constants/theme';
 import { useAuth } from '@/lib/auth/AuthContext';
-import { ridesApi, geoApi, vehiclesApi } from '@/lib/api/endpoints';
+import { useRideSession } from '@/lib/ride/RideSessionContext';
+import { ridesApi, geoApi, vehiclesApi } from '@/lib/api/endpoints'; // geoApi: route only
 import { vehicleIcon, vehicleTypeLabel } from '@/lib/vehicles';
 import type { VehicleType } from '@/components/ui/VehicleCard';
 import type { ApiVehicle, ApiRide } from '@/lib/api/types';
@@ -14,8 +15,19 @@ import type { ApiVehicle, ApiRide } from '@/lib/api/types';
 
 export default function ActiveRideScreen() {
   const { token, refreshUser } = useAuth();
-  const params = useLocalSearchParams<{ rideId?: string; fromLat?: string; fromLng?: string; toLat?: string; toLng?: string; dest?: string; durMin?: string; km?: string; paused?: string; vehicleId?: string }>();
-  const { rideId, fromLat, fromLng, toLat, toLng, dest, vehicleId } = params;
+  const { session } = useRideSession();
+  const params = useLocalSearchParams<{ rideId?: string; fromLat?: string; fromLng?: string; toAddr?: string; toLat?: string; toLng?: string; dest?: string; durMin?: string; km?: string; paused?: string; vehicleId?: string }>();
+  const { fromLat, fromLng, toLat, toLng } = params;
+  // Se toLat/toLng non sono presenti, la corsa è senza destinazione fissa.
+  const hasDestination = !!(toLat && toLng);
+  // PROBLEMA B: preferisci i params di navigazione; se assenti/"undefined"
+  // (es. arrivo dal guard di _layout con params minimali), ricadi sul context.
+  const rideId = params.rideId && params.rideId !== 'undefined'
+    ? params.rideId
+    : session?.rideId ? String(session.rideId) : undefined;
+  const vehicleId = params.vehicleId && params.vehicleId !== 'undefined'
+    ? params.vehicleId
+    : session?.vehicleId ? String(session.vehicleId) : undefined;
   const destMin = params.durMin ? Number(params.durMin) : null;
   const destKm = params.km ? Number(params.km) : null;
   const [seconds, setSeconds] = useState(0);
@@ -93,6 +105,7 @@ export default function ActiveRideScreen() {
 
   const pricePerMin = vehicle?.price_per_min ?? 0;
   const cost = ((seconds / 60) * pricePerMin).toFixed(2);
+  const destinationName = params.dest || params.toAddr || rideData?.to_addr || '';
 
   const mapRef = useRef<MapView>(null);
 
@@ -104,37 +117,24 @@ export default function ActiveRideScreen() {
   // Percorso disegnato sulla mappa: calcolato via OSRM all'avvio.
   const [routeCoords, setRouteCoords] = useState<{ latitude: number; longitude: number }[]>([]);
 
+  // Calcola il percorso solo se la destinazione è stata esplicitamente impostata.
+  // Senza destinazione non mostriamo nessun tracciato sulla mappa.
   useEffect(() => {
+    if (!hasDestination) { setRouteCoords([]); return; }
     let active = true;
     (async () => {
       try {
-        // Destinazione: usa le coordinate passate dalla prenotazione se disponibili,
-        // altrimenti geocodifica l'indirizzo di arrivo della corsa attiva.
-        let destCoords = { lat: startCoords.latitude + 0.012, lng: startCoords.longitude + 0.010 };
-        if (toLat && toLng) {
-          destCoords = { lat: Number(toLat), lng: Number(toLng) };
-        } else {
-          const ride = token ? await ridesApi.active(token) : null;
-          if (ride?.to_addr) {
-            try {
-              const g = await geoApi.geocode(ride.to_addr);
-              if (g[0]) destCoords = { lat: g[0].lat, lng: g[0].lng };
-            } catch { /* usa il fallback */ }
-          }
-        }
         const path = await geoApi.route(
-          { lat: startCoords.latitude, lng: startCoords.longitude }, destCoords,
+          { lat: startCoords.latitude, lng: startCoords.longitude },
+          { lat: Number(toLat), lng: Number(toLng) },
         );
-        if (active) {
-          if (path.length > 1) setRouteCoords(path);
-          else setRouteCoords([]); // empty fallback, no fake Bari coords
-        }
+        if (active) setRouteCoords(path.length > 1 ? path : []);
       } catch {
         if (active) setRouteCoords([]);
       }
     })();
     return () => { active = false; };
-  }, [token, toLat, toLng]);
+  }, [hasDestination, toLat, toLng]);
 
   // Pausa/ripresa corsa: aggiorna lo stato sul backend (PATCH /rides/{id}/pause).
   const togglePauseTo = async (next: boolean) => {
@@ -234,8 +234,8 @@ export default function ActiveRideScreen() {
         </View>
         <View style={styles.topStat}>
           <Ionicons name="location-outline" size={14} color={Colors.muted} />
-          <Text style={styles.topStatValue} numberOfLines={1}>{dest ?? 'Destinazione'}</Text>
-          <Text style={styles.topStatLabel}>{destMin != null && destKm != null ? `${destMin} min · ${destKm} km` : ''}</Text>
+          <Text style={styles.topStatValue} numberOfLines={1}>{destinationName || (hasDestination ? 'Destinazione' : 'Corsa libera')}</Text>
+          <Text style={styles.topStatLabel}>{hasDestination && destMin != null && destKm != null ? `${destMin} min · ${destKm} km` : ''}</Text>
         </View>
       </View>
 
@@ -259,12 +259,21 @@ export default function ActiveRideScreen() {
             lineDashPattern={undefined}
           />
         )}
+        {/* Senza destinazione: mostra l'icona del mezzo sulla posizione di partenza.
+            Con destinazione: marcatore di partenza + destinazione finale. */}
         <Marker coordinate={startCoords}>
           <View style={styles.startMarker}>
-            <Ionicons name="radio-button-on" size={24} color={Colors.primary} />
+            {hasDestination
+              ? <Ionicons name="radio-button-on" size={24} color={Colors.primary} />
+              : <MaterialCommunityIcons
+                  name={(vehicleIcon[(vehicle?.type as VehicleType) ?? 'scooter']) as any}
+                  size={36}
+                  color={Colors.accent}
+                />
+            }
           </View>
         </Marker>
-        {routeCoords.length > 0 && (
+        {hasDestination && routeCoords.length > 0 && (
           <Marker coordinate={routeCoords[routeCoords.length - 1]}>
             <View style={styles.endMarker}>
               <Ionicons name="location" size={24} color={Colors.success} />
@@ -273,8 +282,6 @@ export default function ActiveRideScreen() {
         )}
       </MapView>
 
-      {/* Durante la corsa nessun pulsante naviga fuori da questa schermata:
-          resta solo "Centra mappa" (azione locale, non naviga). */}
       <View style={styles.mapActions}>
         <TouchableOpacity
           style={styles.mapActionBtn}
@@ -284,6 +291,20 @@ export default function ActiveRideScreen() {
         >
           <Ionicons name="locate-outline" size={18} color={Colors.accent} />
           <Text style={styles.mapActionText}>Centra mappa</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.mapActionBtn}
+          onPress={() => router.push({
+            pathname: '/(app)/report',
+            params: {
+              rideId: rideId ?? '',
+              fromLat: String(startCoords.latitude),
+              fromLng: String(startCoords.longitude),
+            },
+          })}
+        >
+          <Ionicons name="warning-outline" size={18} color={Colors.warning} />
+          <Text style={[styles.mapActionText, { color: Colors.warning }]}>Segnala</Text>
         </TouchableOpacity>
       </View>
 
@@ -334,7 +355,12 @@ export default function ActiveRideScreen() {
           </View>
           <View style={[styles.statBox, { borderLeftWidth: 1, borderLeftColor: Colors.border }]}>
             <MaterialCommunityIcons name="currency-eur" size={16} color={Colors.muted} />
-            <Text style={styles.statLabel}>Costo attuale</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.statLabel}>Costo attuale</Text>
+              {hasDestination && destinationName ? (
+                <Text style={styles.statDest} numberOfLines={1}>→ {destinationName}</Text>
+              ) : null}
+            </View>
             <Text style={[styles.statValue, { color: Colors.accent }]}>€ {cost}</Text>
           </View>
         </View>
@@ -414,6 +440,7 @@ const styles = StyleSheet.create({
   statsRow: { flexDirection: 'row', backgroundColor: Colors.surface, borderRadius: 16, borderWidth: 1, borderColor: Colors.border },
   statBox: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12 },
   statLabel: { color: Colors.muted, fontSize: 12, flex: 1 },
+  statDest:  { color: Colors.accent, fontSize: 10, fontWeight: '600', marginTop: 2 },
   statValue: { color: Colors.text, fontWeight: '700', fontSize: 16 },
   controls: { flexDirection: 'row', gap: 10, paddingBottom: 8 },
   ctrlBtn: { flex: 1, backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border, borderRadius: 16, paddingVertical: 12, alignItems: 'center', gap: 6 },

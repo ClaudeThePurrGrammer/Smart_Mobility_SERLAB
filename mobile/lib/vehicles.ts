@@ -19,8 +19,8 @@ export interface MapVehicle {
 /** Coordinate ereditate dai MOCK_VEHICLES originali della home (zona Bari). */
 export const MAP_VEHICLES: MapVehicle[] = [
   { id: '1', name: 'Monopattino',    model: 'Flash F2',   type: 'scooter', lat: 41.1177, lng: 16.8718, batteryPct: 78  },
-  { id: '2', name: 'Bici classica',  model: 'City Rider', type: 'bike',    lat: 41.1200, lng: 16.8690, batteryPct: 100 },
-  { id: '3', name: 'Bici classica',  model: 'City Rider', type: 'bike',    lat: 41.1155, lng: 16.8750, batteryPct: 64  },
+  { id: '2', name: 'Auto elettrica', model: 'City EV',    type: 'car',     lat: 41.1200, lng: 16.8690, batteryPct: 92  },
+  { id: '3', name: 'Auto elettrica', model: 'Compact EV', type: 'car',     lat: 41.1155, lng: 16.8750, batteryPct: 76  },
   { id: '4', name: 'Monopattino',    model: 'Urban Pro',  type: 'scooter', lat: 41.1190, lng: 16.8760, batteryPct: 42  },
   { id: '5', name: 'Bici elettrica', model: 'E-Bike X',   type: 'ebike',   lat: 41.1210, lng: 16.8720, batteryPct: 88  },
 ];
@@ -43,7 +43,6 @@ export function toMapVehicle(v: {
 /** Icona MaterialCommunityIcons per tipologia — indicatori distinti sulla mappa (CU-02 passo 3). */
 export const vehicleIcon: Record<VehicleType, string> = {
   scooter: 'scooter',
-  bike:    'bicycle',
   ebike:   'bicycle-electric',
   car:     'car-electric',
 };
@@ -51,7 +50,6 @@ export const vehicleIcon: Record<VehicleType, string> = {
 /** Etichetta tipologia in italiano. */
 export const vehicleTypeLabel: Record<VehicleType, string> = {
   scooter: 'Monopattino',
-  bike:    'Bicicletta',
   ebike:   'Bici elettrica',
   car:     'Auto elettrica',
 };

@@ -1,6 +1,9 @@
 """GestioneRestrizioni — aree di restrizione geografica (AP.04).
 Lettura aperta a operatore/amministrazione; scrittura solo Amministrazione."""
+import json
 import math
+import urllib.parse
+import urllib.request
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
@@ -8,7 +11,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..deps import require_role
 from ..models import AreaRestrizione, User
-from ..schemas import AreaRestrizioneIn, AreaRestrizioneOut, AreaRestrizioneUpdate
+from ..schemas import AreaRestrizioneConfiguraIn, AreaRestrizioneIn, AreaRestrizioneOut, AreaRestrizioneUpdate
 
 router = APIRouter(prefix="/aree-restrizione", tags=["restrizioni"])
 
@@ -46,6 +49,56 @@ def verifica_posizione(
         if _meters(lat, lng, a.lat, a.lng) <= a.radius_m:
             hits.append({"id": a.id, "nome": a.nome, "tipo": a.tipo})
     return {"restricted": len(hits) > 0, "aree": hits}
+
+
+def _geocode_first(address: str) -> tuple[float, float] | None:
+    """Nominatim OSM: restituisce (lat, lng) del primo risultato, o None."""
+    url = (
+        "https://nominatim.openstreetmap.org/search?"
+        + urllib.parse.urlencode({"q": address, "format": "json", "limit": 1})
+    )
+    req = urllib.request.Request(url, headers={"User-Agent": "SmartMobilityApp/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            results = json.loads(resp.read())
+        if results:
+            return float(results[0]["lat"]), float(results[0]["lon"])
+    except Exception:
+        pass
+    return None
+
+
+@router.post("/configura", response_model=AreaRestrizioneOut, status_code=status.HTTP_201_CREATED)
+def configura_area(
+    data: AreaRestrizioneConfiguraIn,
+    user: User = Depends(_admin),
+    db: Session = Depends(get_db),
+):
+    """UC-21 — Configura un'area di restrizione geocodificando l'indirizzo fornito."""
+    coords = _geocode_first(data.indirizzo)
+    if coords is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Indirizzo non trovato: verifica l'indirizzo e riprova",
+        )
+    lat, lng = coords
+    area = AreaRestrizione(
+        nome=data.indirizzo[:120],
+        tipo=data.tipo,
+        lat=lat,
+        lng=lng,
+        radius_m=data.radius_m,
+        vehicle_types=data.vehicle_types,
+        note=data.note,
+        valida_dal=data.valida_dal,
+        valida_al=data.valida_al,
+        attiva=True,
+        created_by=user.id,
+    )
+    db.add(area)
+    db.commit()
+    db.refresh(area)
+    return area
 
 
 @router.post("", response_model=AreaRestrizioneOut, status_code=status.HTTP_201_CREATED)

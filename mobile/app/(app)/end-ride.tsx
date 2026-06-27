@@ -1,15 +1,14 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, BackHandler } from 'react-native';
 import MapView, { Marker, Circle, PROVIDER_GOOGLE } from 'react-native-maps';
 import { Ionicons, MaterialCommunityIcons, FontAwesome } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Colors, Gradients } from '@/constants/theme';
-import { useAuth } from '@/lib/auth/AuthContext';
-import { useRideSession } from '@/lib/ride/RideSessionContext';
-import { reportsApi, parkingApi } from '@/lib/api/endpoints';
+import { parkingApi } from '@/lib/api/endpoints';
 import { vehicleTypeLabel, vehicleIcon } from '@/lib/vehicles';
 import { haversineMeters, formatDistance } from '@/lib/geo';
+import { useDeviceLocation } from '@/lib/useDeviceLocation';
 import type { VehicleType } from '@/components/ui/VehicleCard';
 import type { ApiParkingArea } from '@/lib/api/types';
 
@@ -23,8 +22,6 @@ const TAGS = [
 const DEFAULT_CENTER = { latitude: 41.1177, longitude: 16.8718 };
 
 export default function EndRideScreen() {
-  const { token } = useAuth();
-  const { endSession } = useRideSession();
   const params = useLocalSearchParams<{
     km?: string; minutes?: string; cost?: string; points?: string;
     vehicleType?: string; endLat?: string; endLng?: string;
@@ -32,15 +29,38 @@ export default function EndRideScreen() {
   const [rating, setRating] = useState(0);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
 
+  // Reset valutazione e tag ad ogni nuova corsa.
+  // I params cambiano ad ogni chiamata di router.replace verso end-ride,
+  // quindi questo effect si attiva ogni volta che arriva una corsa diversa.
+  // Lo screen è tenuto in memoria dai Tabs: senza reset, il rating della
+  // corsa precedente rimarrebbe visibile.
+  useEffect(() => {
+    setRating(0);
+    setSelectedTag(null);
+    setSelectedArea(null);
+  }, [params.km, params.minutes, params.cost]);
+
   const km = Number(params.km ?? 0);
   const minutes = Number(params.minutes ?? 0);
   const cost = Number(params.cost ?? 0);
   const points = Number(params.points ?? 0);
   const vtype = (params.vehicleType ?? 'scooter') as VehicleType;
 
-  const endCoords = (params.endLat && params.endLng)
+  // Coordinate "di rotta" ricevute da active-ride (ultima posizione calcolata).
+  const routeEndCoords = (params.endLat && params.endLng)
     ? { latitude: Number(params.endLat), longitude: Number(params.endLng) }
     : DEFAULT_CENTER;
+
+  // GPS reale del dispositivo: usato per trovare le aree parcheggio più vicine
+  // alla posizione EFFETTIVA in cui l'utente ha terminato la corsa. La corsa
+  // può finire prima della destinazione, quindi il GPS reale è più preciso
+  // delle coordinate del percorso calcolato.
+  const { coords: gpsCoords } = useDeviceLocation();
+  // Usiamo il GPS reale appena disponibile; fallback alle coordinate di rotta.
+  const endCoords = gpsCoords ?? routeEndCoords;
+
+  // Flag: carica le aree solo una volta, usando la miglior posizione disponibile.
+  const areasFetchedRef = useRef(false);
 
   // Blocca il back hardware: la corsa è chiusa sul backend ma la sessione è
   // ancora attiva (tab bloccate). L'unica uscita è "Conferma parcheggio e
@@ -55,37 +75,70 @@ export default function EndRideScreen() {
   const [loadingAreas, setLoadingAreas] = useState(true);
   const [selectedArea, setSelectedArea] = useState<ApiParkingArea | null>(null);
 
+  // Carica le aree quando abbiamo una posizione valida (GPS reale o fallback rotta).
+  // Si ri-esegue quando il GPS reale diventa disponibile la prima volta (sostituisce
+  // i risultati basati sul fallback con quelli basati sul GPS effettivo).
   useEffect(() => {
+    const lat = endCoords.latitude;
+    const lng = endCoords.longitude;
+    // Se il GPS reale è disponibile, forza un nuovo fetch anche se già eseguito con fallback.
+    const isRealGps = !!gpsCoords;
+    if (areasFetchedRef.current && !isRealGps) return;
+    areasFetchedRef.current = true;
+
     let active = true;
-    parkingApi.list(endCoords.latitude, endCoords.longitude)
-      .then((list) => { if (active) setAreas(list); })
-      .catch(() => {})
-      .finally(() => { if (active) setLoadingAreas(false); });
+    setLoadingAreas(true);
+    parkingApi.list(lat, lng, 8)
+      .then((list) => {
+        if (!active) return;
+        if (list.length > 0) {
+          setAreas(list);
+          setLoadingAreas(false);
+        } else {
+          // Nessuna area nel raggio 8 km: mostra tutte le aree disponibili
+          // ordinate per distanza, così l'utente può sempre scegliere un hub.
+          parkingApi.list(lat, lng)
+            .then((all) => { if (active) setAreas(all); })
+            .catch(() => {})
+            .finally(() => { if (active) setLoadingAreas(false); });
+        }
+      })
+      .catch(() => {
+        // In caso di errore carica tutte le aree come fallback.
+        parkingApi.list(lat, lng)
+          .then((all) => { if (active) setAreas(all); })
+          .catch(() => {})
+          .finally(() => { if (active) setLoadingAreas(false); });
+      });
     return () => { active = false; };
-  }, []);
+  }, [gpsCoords?.latitude, gpsCoords?.longitude]);
 
   const areaDistance = (a: ApiParkingArea) =>
     haversineMeters(endCoords, { latitude: a.lat, longitude: a.lng });
 
+  // La mappa si centra sulla posizione GPS reale se disponibile, altrimenti sulla rotta.
   const mapRegion = useMemo(() => ({
     ...endCoords, latitudeDelta: 0.03, longitudeDelta: 0.03,
-  }), [params.endLat, params.endLng]);
+  }), [endCoords.latitude, endCoords.longitude]);
 
-  const finish = async () => {
+  const goToPayment = () => {
     if (!selectedArea) return;
-    if (selectedTag && token) {
-      const tag = TAGS.find((t) => t.id === selectedTag);
-      try {
-        await reportsApi.create(token, {
-          category: tag?.label ?? 'Altro',
-          description: `Segnalazione a fine corsa (valutazione: ${rating || '—'}/5)`,
-        });
-      } catch {}
-    }
-    // Chiusura della sessione: SOLO qui, dopo la conferma del parcheggio.
-    // Da questo momento session torna null → tab bar e navigazione sbloccate.
-    endSession();
-    router.replace('/(app)');
+    // Naviga alla pagina di pagamento, passando tutto il necessario per chiudere la sessione
+    // dopo il pagamento (incluso tag per eventuale segnalazione a fine corsa).
+    router.push({
+      pathname: '/(app)/ride-payment',
+      params: {
+        cost:        String(cost),
+        km:          String(km),
+        minutes:     String(minutes),
+        points:      String(points),
+        vehicleType: vtype,
+        areaId:      String(selectedArea.id),
+        areaName:    selectedArea.name,
+        selectedTag: selectedTag ?? '',
+        rating:      String(rating),
+      },
+    });
   };
 
   return (
@@ -235,15 +288,15 @@ export default function EndRideScreen() {
         </View>
       </View>
 
-      <TouchableOpacity style={styles.homeBtn} onPress={finish} disabled={!selectedArea} activeOpacity={0.85}>
+      <TouchableOpacity style={styles.homeBtn} onPress={goToPayment} disabled={!selectedArea} activeOpacity={0.85}>
         <LinearGradient
           colors={selectedArea ? Gradients.primaryBtn : ['#2A2A40', '#22223A']}
           start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
           style={styles.homeBtnGradient}
         >
-          <Ionicons name={selectedArea ? 'checkmark-circle' : 'lock-closed'} size={18} color={selectedArea ? Colors.text : Colors.muted} />
+          <Ionicons name={selectedArea ? 'card-outline' : 'lock-closed'} size={18} color={selectedArea ? Colors.text : Colors.muted} />
           <Text style={[styles.homeBtnText, !selectedArea && { color: Colors.muted }]}>
-            {selectedArea ? 'Conferma parcheggio e termina' : 'Seleziona un\'area di sosta'}
+            {selectedArea ? 'Procedi al pagamento' : 'Seleziona un\'area di sosta'}
           </Text>
         </LinearGradient>
       </TouchableOpacity>
@@ -272,19 +325,19 @@ const styles = StyleSheet.create({
   sectionTitle:   { color: Colors.text, fontWeight: '700', fontSize: 15 },
   sectionSub:     { color: Colors.muted, fontSize: 12, marginTop: 2 },
   emptyText:      { color: Colors.muted, fontSize: 13, paddingVertical: 16, textAlign: 'center' },
-  areaRow:        { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border, borderRadius: 14, padding: 12 },
-  areaRowActive:  { borderColor: Colors.primary, backgroundColor: 'rgba(124,58,237,0.12)' },
-  areaRowDisabled:{ opacity: 0.5 },
+  areaRow:        { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: Colors.surface, borderRadius: 12, borderWidth: 1, borderColor: Colors.border, padding: 12 },
+  areaRowActive:  { borderColor: Colors.primary, backgroundColor: 'rgba(124,58,237,0.1)' },
+  areaRowDisabled:{ opacity: 0.45 },
   areaIcon:       { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   areaName:       { color: Colors.text, fontWeight: '700', fontSize: 14 },
   areaSub:        { color: Colors.muted, fontSize: 12, marginTop: 2 },
-  tag:            { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 },
-  tagActive:      { borderColor: Colors.primary, backgroundColor: 'rgba(124,58,237,0.2)' },
-  tagText:        { color: Colors.muted, fontSize: 13 },
-  ratingCard:     { marginHorizontal: 16, backgroundColor: Colors.card, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, padding: 16, gap: 10, marginBottom: 16 },
+  ratingCard:     { marginHorizontal: 16, backgroundColor: Colors.card, borderRadius: 16, borderWidth: 1, borderColor: Colors.border, padding: 16, marginBottom: 16, gap: 12 },
   vehicleRow:     { flexDirection: 'row', alignItems: 'center', gap: 12 },
   stars:          { flexDirection: 'row', gap: 8 },
-  homeBtn:        { marginHorizontal: 16, borderRadius: 16, overflow: 'hidden' },
+  tag:            { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: Colors.surface, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: Colors.border },
+  tagActive:      { borderColor: Colors.primary, backgroundColor: 'rgba(124,58,237,0.2)' },
+  tagText:        { color: Colors.muted, fontSize: 13, fontWeight: '600' },
+  homeBtn:        { marginHorizontal: 16, marginBottom: 32, borderRadius: 16, overflow: 'hidden' },
   homeBtnGradient:{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 16 },
-  homeBtnText:    { color: Colors.text, fontWeight: '700', fontSize: 16 },
+  homeBtnText:    { color: Colors.text, fontWeight: '800', fontSize: 16 },
 });

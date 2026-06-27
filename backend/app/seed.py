@@ -19,12 +19,19 @@ def _ago(days=0, hours=0):
 import math
 
 BARI_CENTER = (41.1177, 16.8718)
+# Flotta: solo monopattini elettrici e auto elettriche (ebike rimossi).
 TYPES = [
-    ("scooter", "Smart S1",  "Pro 2024",  1.00, 0.22),
-    ("scooter", "Smart S2",  "Lite",      0.80, 0.19),
-    ("ebike",   "EcoBike E1","Urban 500", 1.20, 0.18),
-    ("ebike",   "EcoBike E2","Compact",   1.00, 0.16),
-    ("bike",    "CityBike B1","Classic",  0.50, 0.10),
+    ("scooter", "Smart S1",   "Pro 2024",   1.00, 0.22),
+    ("scooter", "Smart S2",   "Lite",       0.80, 0.19),
+    ("scooter", "Smart S3",   "Urban",      0.90, 0.20),
+    ("scooter", "Smart S4",   "Speed",      1.10, 0.24),
+    ("ebike",   "EcoBike E1", "City E",     0.50, 0.12),
+    ("ebike",   "EcoBike E2", "Sport E",    0.60, 0.14),
+    ("ebike",   "EcoBike E3", "Urban E",    0.55, 0.13),
+    ("car",     "E-Car C1",   "City EV",    2.00, 0.35),
+    ("car",     "E-Car C2",   "Compact EV", 1.80, 0.32),
+    ("car",     "E-Car C3",   "Mini EV",    1.60, 0.30),
+    ("car",     "E-Car C4",   "SUV EV",     2.20, 0.38),
 ]
 
 def rand_coord(center, radius_km=2.5):
@@ -157,6 +164,168 @@ def fix_sea_vehicles(db: Session) -> None:
         print(f"[fix_sea_vehicles] Riposizionati {fixed} veicoli da mare a terraferma.")
 
 
+def ensure_parking_areas(db: Session) -> None:
+    """Aggiunge/aggiorna aree di parcheggio su più città pugliesi.
+
+    Se il DB contiene meno di 55 aree, svuota e risemina con la lista completa
+    multi-città (60 aree su 11 città pugliesi). Idempotente: se ≥ 55 aree
+    esistono già non fa nulla.
+    """
+    if db.query(ParkingArea).count() >= 55:
+        return
+    # Svuota eventuali aree vecchie (nessuna FK esterna punta a parking_areas).
+    db.query(ParkingArea).delete()
+
+    # (nome, indirizzo, lat, lng, radius_m, capacity, occupied)
+    parkings = [
+        # ── BARI ──────────────────────────────────────────────────────────────
+        ("Parcheggio Piazza Moro",         "Piazza Aldo Moro",          41.1171, 16.8693, 70, 25,  4),
+        ("Sosta Teatro Petruzzelli",       "Corso Cavour",              41.1235, 16.8705, 60, 18,  9),
+        ("Hub Lungomare Nazario Sauro",    "Lungomare N. Sauro",        41.1208, 16.8760, 80, 30, 12),
+        ("Parcheggio Murat",               "Via Sparano",               41.1218, 16.8688, 50, 15,  7),
+        ("Sosta Politecnico",              "Via Orabona",               41.1085, 16.8800, 65, 22,  3),
+        ("Hub Stazione Centrale",          "Piazza Moro (stazione)",    41.1163, 16.8710, 90, 35, 20),
+        ("Sosta Fiera del Levante",        "Lungomare Starita",         41.1055, 16.8650, 70, 28,  8),
+        ("Hub San Pasquale",               "Via Capruzzi",              41.1140, 16.8680, 55, 20,  5),
+        ("Parcheggio Caserma Rossaroll",   "Via Giulio Petroni",        41.1310, 16.8658, 65, 24, 11),
+        ("Sosta Piazza Umberto I",         "Piazza Umberto I",          41.1250, 16.8683, 60, 22,  7),
+        ("Hub Parco 2 Giugno",             "Viale Luigi Jacobini",      41.1060, 16.8730, 75, 30,  6),
+        ("Sosta Borgo Antico",             "Via Venezia",               41.1280, 16.8680, 55, 18,  4),
+
+        # ── FOGGIA ────────────────────────────────────────────────────────────
+        ("Hub Piazza Cavour Foggia",       "Piazza Cavour",             41.4628, 15.5445, 70, 25,  5),
+        ("Sosta Stazione Foggia",          "Viale XXIV Maggio",         41.4610, 15.5490, 80, 30, 10),
+        ("Parcheggio Via Lanza",           "Via Lanza",                 41.4650, 15.5420, 60, 20,  4),
+        ("Hub Piazza Italia Foggia",       "Piazza Italia",             41.4670, 15.5462, 65, 22,  7),
+        ("Sosta Viale Michelangelo",       "Viale Michelangelo",        41.4590, 15.5530, 55, 18,  3),
+        ("Hub Foggia Nord",                "Via Saverio Altamura",      41.4705, 15.5378, 70, 25,  6),
+        ("Sosta Piazza Puglia",            "Piazza Puglia",             41.4558, 15.5402, 50, 16,  2),
+        ("Parcheggio Rione Croci",         "Via Catalano",              41.4642, 15.5512, 60, 20,  8),
+
+        # ── LECCE ─────────────────────────────────────────────────────────────
+        ("Hub Piazza Mazzini Lecce",       "Piazza Mazzini",            40.3513, 18.1764, 70, 25,  5),
+        ("Sosta Porta Rudiae",             "Via Taranto",               40.3530, 18.1710, 60, 20,  8),
+        ("Parcheggio Stazione Lecce",      "Via Don Bosco",             40.3479, 18.1810, 80, 30, 12),
+        ("Hub Villa Comunale Lecce",       "Viale Lo Re",               40.3545, 18.1780, 55, 18,  4),
+        ("Sosta Piazza Sant'Oronzo",       "Piazza Sant'Oronzo",        40.3523, 18.1738, 65, 22,  6),
+        ("Hub Lecce Sud",                  "Via Vittorio Emanuele II",  40.3450, 18.1768, 70, 25,  3),
+        ("Sosta Parco Belloluogo",         "Via Belloluogo",            40.3582, 18.1728, 50, 16,  2),
+        ("Parcheggio Via Adua",            "Via Adua",                  40.3540, 18.1660, 60, 20,  7),
+
+        # ── TARANTO ───────────────────────────────────────────────────────────
+        ("Hub Piazza Garibaldi Taranto",   "Piazza Garibaldi",          40.4641, 17.2480, 70, 25,  8),
+        ("Sosta Stazione Taranto",         "Via Principe Amedeo",       40.4670, 17.2437, 80, 28, 11),
+        ("Parcheggio Città Vecchia",       "Via Duomo",                 40.4700, 17.2580, 60, 20,  5),
+        ("Hub Lungomare Taranto",          "Lungomare Vittorio Emanuele", 40.4628, 17.2450, 65, 22, 7),
+        ("Sosta Via Nitti",                "Via Francesco Nitti",       40.4605, 17.2510, 55, 18,  4),
+        ("Hub Taranto Nord",               "Via Lago di Como",          40.4722, 17.2390, 70, 25,  6),
+
+        # ── MOLFETTA ──────────────────────────────────────────────────────────
+        ("Hub Piazza Garibaldi Molfetta",  "Piazza Garibaldi",          41.2015, 16.5980, 60, 20,  5),
+        ("Sosta Porto Molfetta",           "Via Banchina S. Domenico",  41.2040, 16.5950, 55, 18,  7),
+        ("Parcheggio Stazione Molfetta",   "Via Martiri di Dogali",     41.1990, 16.6010, 65, 22,  4),
+        ("Hub Via Milano Molfetta",        "Via Milano",                41.1975, 16.5990, 50, 16,  3),
+
+        # ── BARLETTA ──────────────────────────────────────────────────────────
+        ("Hub Castello Barletta",          "Piazza Castello",           41.3188, 16.2816, 65, 22,  6),
+        ("Sosta Stazione Barletta",        "Corso Garibaldi",           41.3150, 16.2850, 70, 25,  8),
+        ("Parcheggio Via Zanardelli",      "Via Zanardelli",            41.3200, 16.2780, 55, 18,  4),
+        ("Hub Corso Vittorio Emanuele BA", "Corso Vittorio Emanuele",   41.3175, 16.2770, 60, 20,  5),
+
+        # ── ANDRIA ────────────────────────────────────────────────────────────
+        ("Hub Piazza Catuma Andria",       "Piazza Catuma",             41.2290, 16.2960, 65, 22,  5),
+        ("Sosta Stazione Andria",          "Via Barletta",              41.2260, 16.2990, 60, 20,  7),
+        ("Parcheggio Via Bari Andria",     "Via Bari",                  41.2320, 16.2930, 55, 18,  3),
+
+        # ── BRINDISI ──────────────────────────────────────────────────────────
+        ("Hub Piazza Vittoria Brindisi",   "Piazza Vittoria",           40.6330, 17.9390, 70, 25,  6),
+        ("Sosta Porto Brindisi",           "Viale Regina Margherita",   40.6355, 17.9465, 75, 28,  9),
+        ("Parcheggio Stazione Brindisi",   "Piazza Crispi",             40.6278, 17.9342, 80, 30, 11),
+        ("Hub Lungomare Brindisi",         "Lungomare Regina Margherita", 40.6372, 17.9412, 60, 20, 4),
+
+        # ── ALTAMURA ──────────────────────────────────────────────────────────
+        ("Hub Piazza Duomo Altamura",      "Piazza Duomo",              40.8275, 16.5520, 60, 20,  5),
+        ("Sosta Stazione Altamura",        "Via della Stazione",        40.8240, 16.5550, 55, 18,  3),
+        ("Parcheggio Via Matera",          "Via Matera",                40.8300, 16.5490, 50, 16,  2),
+
+        # ── MANFREDONIA ───────────────────────────────────────────────────────
+        ("Hub Piazza del Popolo Manf.",    "Piazza del Popolo",         41.6270, 15.9170, 65, 22,  5),
+        ("Sosta Porto Manfredonia",        "Lungomare del Sole",        41.6312, 15.9112, 70, 25,  7),
+        ("Parcheggio Siponto",             "Via Scillitani",            41.6012, 15.9258, 55, 18,  3),
+
+        # ── TRANI ─────────────────────────────────────────────────────────────
+        ("Hub Lungomare Trani",            "Lungomare Cristoforo Colombo", 41.2782, 16.4158, 65, 22, 6),
+        ("Sosta Cattedrale Trani",         "Piazza Duomo",              41.2800, 16.4138, 60, 20,  5),
+        ("Parcheggio Stazione Trani",      "Piazza della Repubblica",   41.2740, 16.4202, 70, 25,  8),
+
+        # ── CERIGNOLA ─────────────────────────────────────────────────────────
+        ("Hub Piazza della Repubblica CE", "Piazza della Repubblica",   41.2654, 15.8997, 60, 20,  4),
+        ("Sosta Stazione Cerignola",       "Via della Stazione",        41.2620, 15.9040, 55, 18,  3),
+    ]
+
+    for name, address, lat, lng, radius, cap, occ in parkings:
+        db.add(ParkingArea(
+            name=name, address=address, lat=lat, lng=lng,
+            radius_m=radius, capacity=cap, occupied=occ,
+        ))
+    db.commit()
+    print(f"[ensure_parking_areas] Aggiunte {len(parkings)} aree di parcheggio su più città.")
+
+
+def migrate_ebikes_to_cars(db: Session) -> None:
+    """Converte le ebike esistenti in auto elettriche (rimozione tipo dalla flotta).
+
+    I veicoli di tipo 'ebike' non sono più nel catalogo; quelli già presenti
+    vengono aggiornati a 'car' con la tariffa standard dell'auto compatta.
+    Idempotente: se non ci sono ebike, non fa nulla.
+    """
+    ebikes = db.query(Vehicle).filter(Vehicle.type == "ebike").all()
+    if not ebikes:
+        return
+    car_types = [t for t in TYPES if t[0] == "car"]
+    for i, v in enumerate(ebikes):
+        _, car_name, model, fee, ppm = car_types[i % len(car_types)]
+        v.type = "car"
+        v.name = f"{car_name}-{i + 1:02d}"   # rinomina: "EcoBike E1" → "E-Car C1-01"
+        v.model = model
+        v.unlock_fee = fee
+        v.price_per_min = ppm
+    db.commit()
+    print(f"[migrate_ebikes_to_cars] Convertiti {len(ebikes)} ebike → auto elettrica.")
+
+
+def ensure_electric_cars(db: Session) -> None:
+    """Garantisce almeno 12 auto elettriche nella flotta."""
+    existing = db.query(Vehicle).filter(Vehicle.type == "car").count()
+    if existing >= 12:
+        return
+    to_add = 12 - existing
+    car_types = [t for t in TYPES if t[0] == "car"]
+    added = 0
+    for i in range(to_add):
+        vtype, name, model, fee, ppm = car_types[i % len(car_types)]
+        coord = rand_land_coord()
+        if coord is None:
+            print(f"[ensure_electric_cars][warn] Nessuna coordinata valida per {name}.")
+            continue
+        lat, lng = coord
+        db.add(Vehicle(
+            name=f"{name}-{existing + i + 1:02d}",
+            model=model,
+            type=vtype,
+            lat=lat,
+            lng=lng,
+            battery_pct=random.randint(45, 100),
+            status="available",
+            unlock_fee=fee,
+            price_per_min=ppm,
+        ))
+        added += 1
+    if added:
+        db.commit()
+        print(f"[ensure_electric_cars] Aggiunte {added} auto elettriche (totale target: 12).")
+
+
 def reset_and_reseed(db: Session) -> None:
     """Azzera tutti i dati utente e risemina da zero.
 
@@ -205,21 +374,11 @@ def seed(db: Session) -> None:
                 unlock_fee=fee,
                 price_per_min=ppm,
             ))
+        db.commit()
 
-    if db.query(ParkingArea).count() == 0:
-        parkings = [
-            ("Parcheggio Piazza Moro", "Piazza Aldo Moro", 41.1171, 16.8693, 70, 25, 4),
-            ("Sosta Teatro Petruzzelli", "Corso Cavour", 41.1235, 16.8705, 60, 18, 9),
-            ("Hub Lungomare Nazario Sauro", "Lungomare N. Sauro", 41.1208, 16.8760, 80, 30, 12),
-            ("Parcheggio Murat", "Via Sparano", 41.1218, 16.8688, 50, 15, 7),
-            ("Sosta Politecnico", "Via Orabona", 41.1085, 16.8800, 65, 22, 3),
-            ("Hub Stazione Centrale", "Piazza Moro (stazione)", 41.1163, 16.8710, 90, 35, 20),
-        ]
-        for name, address, lat, lng, radius, cap, occ in parkings:
-            db.add(ParkingArea(
-                name=name, address=address, lat=lat, lng=lng,
-                radius_m=radius, capacity=cap, occupied=occ,
-            ))
+    ensure_electric_cars(db)
+
+    ensure_parking_areas(db)
 
     if db.query(Promotion).count() == 0:
         for p in PROMOTIONS:
@@ -227,11 +386,11 @@ def seed(db: Session) -> None:
 
     if db.query(AreaRestrizione).count() == 0:
         aree = [
-            ("ZTL Centro Storico", "ZTL", 41.1258, 16.8690, 350, ["scooter", "ebike", "bike"], "08:00-20:00"),
+            ("ZTL Centro Storico", "ZTL", 41.1258, 16.8690, 350, ["scooter", "ebike", "car"], "08:00-20:00"),
             ("Zona pedonale Sparano", "PEDONALE", 41.1210, 16.8688, 180, [], None),
-            ("No-parking Lungomare", "NO_PARKING", 41.1205, 16.8765, 220, ["scooter"], None),
+            ("No-parking Lungomare", "NO_PARKING", 41.1205, 16.8765, 220, ["scooter", "car"], None),
             ("Area vietata Porto", "NO_GO", 41.1320, 16.8650, 300, [], None),
-            ("Limite velocità Università", "LIMITE_VELOCITA", 41.1085, 16.8800, 250, ["scooter", "ebike"], None),
+            ("Limite velocità Università", "LIMITE_VELOCITA", 41.1085, 16.8800, 250, ["scooter", "ebike", "car"], None),
         ]
         for nome, tipo, lat, lng, radius, vtypes, orario in aree:
             db.add(AreaRestrizione(
@@ -282,10 +441,10 @@ def seed(db: Session) -> None:
 
     rides = [
         ("scooter", "Via Roma 12", "Porta Romana", 2.4, 12, 3.60, 18, _ago(hours=4)),
-        ("bike", "Stazione Centrale", "Corso Italia", 1.8, 9, 2.80, 12, _ago(days=1)),
+        ("car", "Stazione Centrale", "Corso Italia", 1.8, 9, 4.90, 12, _ago(days=1)),
         ("ebike", "Piazza Garibaldi", "Viale Europa", 3.2, 18, 4.50, 24, _ago(days=10)),
         ("scooter", "Via Napoli 5", "Università", 2.1, 11, 3.20, 16, _ago(days=12)),
-        ("bike", "Casa", "Lavoro", 4.1, 22, 5.10, 30, _ago(days=15)),
+        ("car", "Casa", "Lavoro", 4.1, 22, 8.90, 30, _ago(days=15)),
         ("scooter", "Centro Commerciale", "Parco Cittadino", 1.5, 8, 2.40, 10, _ago(days=23)),
     ]
     for vtype, frm, to, km, mins, cost, pts, when in rides:

@@ -1,67 +1,55 @@
-import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Dimensions, TextInput, Alert } from 'react-native';
+/**
+ * ScanScreen — scanner QR generico (accesso dalla home, senza mezzo pre-selezionato).
+ *
+ * Dopo la scansione o l'inserimento manuale del codice NON avvia la corsa
+ * direttamente: naviga su activate.tsx passando il codice come prefill.
+ * activate.tsx gestisce validazione, verifica mezzo e schermata di riepilogo
+ * prima di avviare effettivamente la corsa.
+ */
+import React, { useCallback, useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Dimensions, TextInput } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Colors, Gradients } from '@/constants/theme';
-import { useAuth } from '@/lib/auth/AuthContext';
-import { useRideSession } from '@/lib/ride/RideSessionContext';
-import { ridesApi } from '@/lib/api/endpoints';
 
 const { width } = Dimensions.get('window');
 const FRAME = width * 0.68;
 
-// Estrae l'ID numerico del mezzo dal contenuto del QR / codice (es. "SM-42" -> 42).
-function parseVehicleId(raw: string): number | null {
-  const match = raw.match(/\d+/);
-  return match ? Number(match[0]) : null;
-}
-
 export default function ScanScreen() {
-  const { token } = useAuth();
-  const { startSession } = useRideSession();
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [manualMode, setManualMode] = useState(false);
   const [code, setCode] = useState('');
-  const [starting, setStarting] = useState(false);
 
-  // Avvia una corsa sul mezzo identificato dal codice e va alla schermata corsa attiva.
-  const startRideFromCode = async (raw: string) => {
-    const vehicleId = parseVehicleId(raw);
-    if (vehicleId == null) {
-      Alert.alert('Codice non valido', 'Il codice del veicolo non è leggibile. Riprova.');
+  // Reset completo ogni volta che la schermata viene messa a fuoco
+  useFocusEffect(
+    useCallback(() => {
       setScanned(false);
-      return;
-    }
-    if (!token) {
-      Alert.alert('Sessione scaduta', 'Effettua di nuovo l\'accesso.');
-      return;
-    }
-    setStarting(true);
-    try {
-      const ride = await ridesApi.start(token, { vehicle_id: vehicleId, from_addr: 'QR Scan' });
-      startSession(ride);
-      router.replace({ pathname: '/(app)/active-ride', params: { rideId: String(ride.id), vehicleId: String(vehicleId) } });
-    } catch (e: any) {
-      Alert.alert('Sblocco non riuscito', e?.message ?? 'Il mezzo non è disponibile.');
-      setScanned(false);
-    } finally {
-      setStarting(false);
-    }
+      setManualMode(false);
+      setCode('');
+    }, []),
+  );
+
+  /** Naviga su activate.tsx con il codice scansionato/inserito come prefill. */
+  const goToActivate = (raw: string) => {
+    router.push({
+      pathname: '/(app)/activate',
+      params: { prefill: raw },
+    });
   };
 
   const handleScanned = ({ data }: { data: string }) => {
-    if (scanned || starting) return;
+    if (scanned) return;
     setScanned(true);
-    startRideFromCode(data);
+    goToActivate(data);
   };
 
   const handleManualSubmit = () => {
-    if (code.trim().length > 0 && !starting) {
-      startRideFromCode(code.trim());
-    }
+    const trimmed = code.trim();
+    if (!trimmed) return;
+    goToActivate(trimmed);
   };
 
   if (!permission) return <View style={styles.container} />;
@@ -93,7 +81,7 @@ export default function ScanScreen() {
   if (manualMode) {
     return (
       <View style={styles.container}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => setManualMode(false)}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => { setManualMode(false); setCode(''); }}>
           <Ionicons name="arrow-back" size={24} color={Colors.text} />
         </TouchableOpacity>
         <View style={styles.manualBox}>
@@ -106,11 +94,19 @@ export default function ScanScreen() {
             placeholder="es. SM-12345"
             placeholderTextColor={Colors.muted}
             autoCapitalize="characters"
+            autoCorrect={false}
+            autoFocus
+            returnKeyType="done"
+            onSubmitEditing={handleManualSubmit}
             style={styles.manualInput}
           />
-          <TouchableOpacity style={styles.permBtn} onPress={handleManualSubmit} disabled={starting}>
+          <TouchableOpacity
+            style={[styles.permBtn, !code.trim() && { opacity: 0.45 }]}
+            onPress={handleManualSubmit}
+            disabled={!code.trim()}
+          >
             <LinearGradient colors={Gradients.primaryBtn} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.permBtnGradient}>
-              <Text style={styles.permBtnText}>{starting ? 'Sblocco...' : 'Sblocca veicolo'}</Text>
+              <Text style={styles.permBtnText}>Continua</Text>
             </LinearGradient>
           </TouchableOpacity>
         </View>

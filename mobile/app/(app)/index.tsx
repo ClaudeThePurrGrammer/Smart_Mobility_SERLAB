@@ -12,8 +12,8 @@ import { Colors, Gradients } from '@/constants/theme';
 import { useDeviceLocation } from '@/lib/useDeviceLocation';
 import { vehicleIcon, toMapVehicle, type MapVehicle } from '@/lib/vehicles';
 import { haversineMeters, formatDistance } from '@/lib/geo';
-import { vehiclesApi, geoApi } from '@/lib/api/endpoints';
-import type { ApiGeocodeResult } from '@/lib/api/types';
+import { vehiclesApi, geoApi, parkingApi } from '@/lib/api/endpoints';
+import type { ApiGeocodeResult, ApiParkingArea } from '@/lib/api/types';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { useRideSession } from '@/lib/ride/RideSessionContext';
 import { useReservationSession } from '@/lib/reservation/ReservationSessionContext';
@@ -78,6 +78,19 @@ export default function HomeScreen() {
   // ── Mezzi caricati dal Controller (DB) ─────────────────────────────────────
   const { token } = useAuth();
   const [vehicles, setVehicles] = useState<MapVehicle[]>([]);
+
+  // ── Aree di parcheggio: caricate una sola volta appena disponibile il GPS ──
+  const [parkingAreas, setParkingAreas] = useState<ApiParkingArea[]>([]);
+  const parkingFetched = useRef(false);
+  useEffect(() => {
+    if (!coords || parkingFetched.current) return;
+    parkingFetched.current = true;
+    // Home map: carica TUTTE le aree di parcheggio (nessun filtro raggio),
+    // così l'utente vede tutti gli hub disponibili su tutte le città.
+    parkingApi.list()
+      .then(setParkingAreas)
+      .catch(() => {});
+  }, [coords]);
 
   // ── Sessione corsa esplicita: banner solo se l'utente ha avviato una corsa ──
   const { session } = useRideSession();
@@ -325,6 +338,27 @@ export default function HomeScreen() {
             </Marker>
           );
         })}
+
+        {/* Aree di parcheggio: cerchio trasparente + pin "P" */}
+        {parkingAreas.map(area => (
+          <React.Fragment key={`parking-${area.id}`}>
+            <Circle
+              center={{ latitude: area.lat, longitude: area.lng }}
+              radius={area.radius_m}
+              strokeColor="rgba(16,185,129,0.5)"
+              strokeWidth={1.5}
+              fillColor="rgba(16,185,129,0.07)"
+            />
+            <Marker
+              coordinate={{ latitude: area.lat, longitude: area.lng }}
+              tracksViewChanges={false}
+            >
+              <View style={styles.parkingMarker}>
+                <Text style={styles.parkingMarkerText}>P</Text>
+              </View>
+            </Marker>
+          </React.Fragment>
+        ))}
       </MapView>
 
       {/* Hamburger */}
@@ -392,7 +426,6 @@ export default function HomeScreen() {
                 { icon: 'wallet-outline',   label: 'Portafoglio',      path: '/(app)/wallet' },
                 { icon: 'gift-outline',     label: 'Promozioni',       path: '/(app)/promotions' },
                 { icon: 'headset-outline',  label: 'Servizio clienti', path: '/(app)/support' },
-                { icon: 'warning-outline',  label: 'Segnalazioni',     path: '/(app)/report' },
                 { icon: 'settings-outline', label: 'Impostazioni',     path: '/(app)/settings' },
               ].map(item => (
                 <TouchableOpacity key={item.label} style={styles.drawerItem} onPress={() => drawerNav(item.path)} activeOpacity={0.65}>
@@ -706,6 +739,8 @@ const styles = StyleSheet.create({
   qrBtnText:         { color: Colors.text, fontSize: 16, fontWeight: '700' },
   marker:            { backgroundColor: 'rgba(13,13,26,0.85)', borderWidth: 1.5, borderColor: Colors.primary, borderRadius: 10, padding: 6 },
   markerSelected:    { backgroundColor: Colors.primary, borderColor: Colors.accent, transform: [{ scale: 1.15 }] },
+  parkingMarker:     { backgroundColor: 'rgba(16,185,129,0.85)', borderWidth: 1.5, borderColor: '#10b981', borderRadius: 8, width: 22, height: 22, alignItems: 'center', justifyContent: 'center' },
+  parkingMarkerText: { color: '#fff', fontSize: 11, fontWeight: '800' },
 
   // Search modal
   searchModal:       { position: 'absolute', top: 0, left: 0, right: 0, borderBottomLeftRadius: 28, borderBottomRightRadius: 28, overflow: 'hidden', borderWidth: 1, borderTopWidth: 0, borderColor: 'rgba(167,139,250,0.25)' },

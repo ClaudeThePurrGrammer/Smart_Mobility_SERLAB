@@ -31,6 +31,7 @@ def create_report(data: ReportIn, user: User = Depends(get_current_user), db: Se
         gravita=data.gravita,
         gps_lat=data.gps_lat,
         gps_lng=data.gps_lng,
+        attachments=data.attachments,
         stato="APERTA",
     )
     db.add(segn)

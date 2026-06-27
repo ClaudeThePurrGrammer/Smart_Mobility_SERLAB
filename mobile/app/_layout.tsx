@@ -13,6 +13,8 @@ export default function RootLayout() {
         <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: Colors.bg } }}>
           <Stack.Screen name="(auth)" />
           <Stack.Screen name="(app)" />
+          <Stack.Screen name="(admin)" />
+          <Stack.Screen name="(operatore)" />
         </Stack>
       </AuthProvider>
     </GestureHandlerRootView>

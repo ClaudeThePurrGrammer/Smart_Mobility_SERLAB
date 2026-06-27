@@ -11,9 +11,8 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Colors } from '@/constants/theme';
 import { useAuth } from '@/lib/auth/AuthContext';
-import { useRideSession } from '@/lib/ride/RideSessionContext';
 import { useReservationSession } from '@/lib/reservation/ReservationSessionContext';
-import { ridesApi, reservationsApi } from '@/lib/api/endpoints';
+import { reservationsApi } from '@/lib/api/endpoints';
 import { vehicleIcon, vehicleTypeLabel } from '@/lib/vehicles';
 
 const RESERVATION_MAX_SEC = 600; // 10 minuti
@@ -30,7 +29,6 @@ export default function ActiveReservationScreen() {
   }>();
 
   const { token } = useAuth();
-  const { startSession } = useRideSession();
   const { clearReservation } = useReservationSession();
 
   // Lazy init: calcola il residuo reale già al primo render (evita il flash "10:00").
@@ -42,6 +40,13 @@ export default function ActiveReservationScreen() {
   const secondsRef = useRef(secondsRemaining);
   const [cancelling, setCancelling] = useState(false);
   const [starting, setStarting] = useState(false);
+
+  // Reset stati UI ogni volta che cambia la prenotazione (es. seconda prenotazione
+  // dopo una corsa terminata — lo screen rimane montato in memoria dai Tabs).
+  useEffect(() => {
+    setStarting(false);
+    setCancelling(false);
+  }, [reservationId]);
 
   // Blocca il tasto hardware back su Android.
   useEffect(() => {
@@ -105,34 +110,20 @@ export default function ActiveReservationScreen() {
     router.replace('/(app)/');
   };
 
-  const handleStartRide = async () => {
-    if (starting || cancelling || !token || !vehicleId) return;
-    setStarting(true);
-    try {
-      const ride = await ridesApi.start(token, {
-        vehicle_id: Number(vehicleId),
-        vehicle_type: vehicleType ?? 'scooter',
-        from_addr: 'Posizione attuale',
-        ...(toAddr ? { to_addr: toAddr } : {}),
-      });
-      // Marca la prenotazione come usata (best-effort, non blocca il flusso).
-      if (reservationId) {
-        try { await reservationsApi.cancel(token, Number(reservationId)); } catch {}
-      }
-      startSession(ride);
-      clearReservation();
-      router.replace({
-        pathname: '/(app)/active-ride',
-        params: {
-          rideId: String(ride.id),
-          vehicleId: vehicleId,
-          ...(fromLat && fromLng ? { fromLat, fromLng } : {}),
-          ...(toLat && toLng ? { toLat, toLng } : {}),
-        },
-      });
-    } catch {
-      setStarting(false);
-    }
+  // Sblocca ora → porta l'utente alla scansione QR / inserimento codice.
+  // La corsa NON parte direttamente: richiede conferma fisica tramite QR o codice.
+  const handleUnlock = () => {
+    if (cancelling) return;
+    router.push({
+      pathname: '/(app)/activate',
+      params: {
+        prefill: vehicleId ? `SM-${vehicleId}` : '',
+        reservationId: reservationId ?? '',
+        ...(fromLat && fromLng ? { fromLat, fromLng } : {}),
+        ...(toAddr ? { toAddr } : {}),
+        ...(toLat && toLng ? { toLat, toLng } : {}),
+      },
+    });
   };
 
   const mm = String(Math.floor(secondsRemaining / 60)).padStart(2, '0');
@@ -157,13 +148,13 @@ export default function ActiveReservationScreen() {
         <View style={styles.vehicleCard}>
           <View style={styles.vehicleIconBox}>
             <MaterialCommunityIcons
-              name={vehicleIcon[vehicleType ?? 'scooter'] as any}
+              name={vehicleIcon[(vehicleType ?? 'scooter') as keyof typeof vehicleIcon] as any}
               size={32}
               color={Colors.accent}
             />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.vehicleName}>{vehicleName ?? vehicleTypeLabel[vehicleType ?? 'scooter']}</Text>
+            <Text style={styles.vehicleName}>{vehicleName ?? vehicleTypeLabel[(vehicleType ?? 'scooter') as keyof typeof vehicleTypeLabel]}</Text>
             {vehicleModel ? <Text style={styles.vehicleModel}>{vehicleModel}</Text> : null}
           </View>
           {batteryPct ? (
@@ -210,8 +201,8 @@ export default function ActiveReservationScreen() {
       <View style={styles.footer}>
         <TouchableOpacity
           style={styles.startBtn}
-          onPress={handleStartRide}
-          disabled={starting || cancelling}
+          onPress={handleUnlock}
+          disabled={cancelling}
           activeOpacity={0.85}
         >
           <LinearGradient
@@ -220,12 +211,8 @@ export default function ActiveReservationScreen() {
             end={{ x: 1, y: 0 }}
             style={styles.startBtnGradient}
           >
-            {starting
-              ? <ActivityIndicator color={Colors.text} />
-              : <>
-                  <Ionicons name="flash" size={20} color={Colors.text} />
-                  <Text style={styles.startBtnText}>Sblocca ora</Text>
-                </>}
+            <Ionicons name="qr-code-outline" size={20} color={Colors.text} />
+            <Text style={styles.startBtnText}>Scansiona / Inserisci codice</Text>
           </LinearGradient>
         </TouchableOpacity>
         <TouchableOpacity

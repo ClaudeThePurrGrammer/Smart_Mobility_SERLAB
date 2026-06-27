@@ -12,6 +12,7 @@ router = APIRouter(prefix="/vehicles", tags=["vehicles"])
 
 # Ampiezza del drift GPS simulato ad ogni refresh (~10 m).
 _DRIFT = 0.0001
+SUPPORTED_VEHICLE_TYPES = ("scooter", "ebike", "car")
 
 
 @router.get("", response_model=list[VehicleOut])
@@ -21,7 +22,7 @@ def list_vehicles(
     only_available: bool = Query(default=False),
     db: Session = Depends(get_db),
 ):
-    q = db.query(Vehicle)
+    q = db.query(Vehicle).filter(Vehicle.type.in_(SUPPORTED_VEHICLE_TYPES))
     if only_available:
         q = q.filter(Vehicle.status == "available")
     vehicles = q.order_by(Vehicle.id).all()
@@ -60,6 +61,6 @@ def list_vehicles(
 @router.get("/{vehicle_id}", response_model=VehicleOut)
 def get_vehicle(vehicle_id: int, db: Session = Depends(get_db)):
     v = db.get(Vehicle, vehicle_id)
-    if not v:
+    if not v or v.type not in SUPPORTED_VEHICLE_TYPES:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Mezzo non trovato")
     return v

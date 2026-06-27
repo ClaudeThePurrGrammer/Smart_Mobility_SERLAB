@@ -14,8 +14,8 @@ interface AuthContextValue {
   token: string | null;
   /** true finché non sappiamo se esiste una sessione salvata. */
   initializing: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  register: (data: { name: string; surname: string; email: string; password: string; phone?: string }) => Promise<void>;
+  login: (email: string, password: string) => Promise<ApiUser>;
+  register: (data: { name: string; surname: string; email: string; password: string; phone?: string; role?: string; codice_attivazione?: string }) => Promise<ApiUser>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   /** Aggiorna lo user in cache (es. dopo topup/ride) senza rifare la fetch. */
@@ -53,16 +53,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     })();
   }, []);
 
-  const login = useCallback(async (email: string, password: string) => {
+  const login = useCallback(async (email: string, password: string): Promise<ApiUser> => {
     const res = await authApi.login({ email, password });
     setUserState(res.user);
     await persistToken(res.access_token);
+    return res.user;
   }, [persistToken]);
 
-  const register = useCallback(async (data: { name: string; surname: string; email: string; password: string; phone?: string }) => {
+  const register = useCallback(async (data: { name: string; surname: string; email: string; password: string; phone?: string; role?: string; codice_attivazione?: string }): Promise<ApiUser> => {
     const res = await authApi.register(data);
     setUserState(res.user);
     await persistToken(res.access_token);
+    return res.user;
   }, [persistToken]);
 
   const logout = useCallback(async () => {

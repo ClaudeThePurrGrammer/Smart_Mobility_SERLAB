@@ -4,22 +4,24 @@
  * L'utente arriva qui dopo aver selezionato un mezzo sulla mappa.
  * Può scegliere come avviare fisicamente la corsa:
  *   1. Prenota (sblocco remoto via app)
- *   2. Scansiona QR (codice fisico sul mezzo)
- *   3. Inserisci codice manualmente
+ *   2. Scansiona QR → activate.tsx (scanner + preview)
+ *   3. Inserisci codice → activate.tsx in modalità manuale + preview
+ *
+ * Tutte le opzioni che richiedono il codice passano per activate.tsx
+ * che gestisce validazione, verifica mezzo e schermata di riepilogo
+ * prima di avviare effettivamente la corsa.
  */
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ActivityIndicator,
-  TextInput, ScrollView, KeyboardAvoidingView, Platform,
+  ScrollView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import { Colors, Gradients } from '@/constants/theme';
-import { vehiclesApi, ridesApi } from '@/lib/api/endpoints';
+import { Colors } from '@/constants/theme';
+import { vehiclesApi } from '@/lib/api/endpoints';
 import { vehicleTypeLabel, vehicleIcon } from '@/lib/vehicles';
-import { useAuth } from '@/lib/auth/AuthContext';
-import { useRideSession } from '@/lib/ride/RideSessionContext';
 import type { ApiVehicle } from '@/lib/api/types';
 import type { VehicleType } from '@/components/ui/VehicleCard';
 
@@ -34,15 +36,8 @@ export default function VehicleActionScreen() {
   }>();
   const { vehicleId, fromLat, fromLng, toAddr, toLat, toLng } = params;
 
-  const { token } = useAuth();
-  const { startSession } = useRideSession();
-
   const [vehicle, setVehicle] = useState<ApiVehicle | null>(null);
   const [loading, setLoading] = useState(true);
-  const [codeVisible, setCodeVisible] = useState(false);
-  const [code, setCode] = useState('');
-  const [activating, setActivating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!vehicleId) { setLoading(false); return; }
@@ -55,40 +50,12 @@ export default function VehicleActionScreen() {
   const batteryColor = (pct: number) =>
     pct > 50 ? Colors.success : pct > 20 ? Colors.warning : Colors.danger;
 
-  /** Avvia la corsa con un codice testuale (es. "SM-42" o "42"). */
-  const handleActivateCode = async () => {
-    const match = code.match(/\d+/);
-    if (!match) { setError('Codice non valido. Usa il formato SM-42 o inserisci solo il numero.'); return; }
-    const vid = Number(match[0]);
-    if (!token) return;
-    setActivating(true);
-    setError(null);
-    try {
-      const v = await vehiclesApi.get(vid);
-      if (v.status !== 'available') {
-        setError('Questo mezzo non è disponibile al momento.');
-        return;
-      }
-      const ride = await ridesApi.start(token, {
-        vehicle_id: v.id,
-        vehicle_type: v.type,
-        from_addr: 'Posizione attuale',
-      });
-      startSession(ride);
-      router.replace({
-        pathname: '/(app)/active-ride',
-        params: {
-          rideId: String(ride.id),
-          vehicleId: String(v.id),
-          ...(fromLat && fromLng ? { fromLat, fromLng } : {}),
-        },
-      });
-    } catch (e: any) {
-      setError(e?.message ?? 'Impossibile attivare la corsa. Verifica il codice e riprova.');
-    } finally {
-      setActivating(false);
-    }
-  };
+  /** Params comuni da passare ad activate.tsx */
+  const activateParams = () => ({
+    prefill: `SM-${vehicleId}`,
+    ...(fromLat && fromLng ? { fromLat, fromLng } : {}),
+    ...(toAddr && toLat && toLng ? { toAddr, toLat, toLng } : {}),
+  });
 
   if (loading) {
     return (
@@ -101,10 +68,7 @@ export default function VehicleActionScreen() {
   const vtype = (vehicle?.type ?? 'scooter') as VehicleType;
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
+    <View style={styles.container}>
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
 
         {/* Header */}
@@ -162,7 +126,6 @@ export default function VehicleActionScreen() {
               params: {
                 vehicleId: vehicleId ?? '',
                 ...(fromLat && fromLng ? { fromLat, fromLng } : {}),
-                // Ripassa invariata la destinazione ricevuta dalla Home (se presente).
                 ...(toAddr && toLat && toLng ? { toAddr, toLat, toLng } : {}),
               },
             })
@@ -185,11 +148,16 @@ export default function VehicleActionScreen() {
           </LinearGradient>
         </TouchableOpacity>
 
-        {/* Opzione 2 — Scansiona QR */}
+        {/* Opzione 2 — Scansiona QR → activate.tsx scanner step */}
         <TouchableOpacity
           style={styles.optionCard}
           activeOpacity={0.82}
-          onPress={() => router.push('/(app)/scan')}
+          onPress={() =>
+            router.push({
+              pathname: '/(app)/activate',
+              params: activateParams(),
+            })
+          }
         >
           <LinearGradient
             colors={['rgba(34,197,94,0.15)', 'rgba(34,197,94,0.06)']}
@@ -208,82 +176,36 @@ export default function VehicleActionScreen() {
           </LinearGradient>
         </TouchableOpacity>
 
-        {/* Opzione 3 — Codice manuale (espandibile) */}
+        {/* Opzione 3 — Codice manuale → activate.tsx manual step */}
         <TouchableOpacity
           style={styles.optionCard}
           activeOpacity={0.82}
-          onPress={() => setCodeVisible(v => !v)}
+          onPress={() =>
+            router.push({
+              pathname: '/(app)/activate',
+              params: { ...activateParams(), startMode: 'manual' },
+            })
+          }
         >
-          <View style={styles.optionGradient}>
+          <LinearGradient
+            colors={['rgba(245,158,11,0.15)', 'rgba(245,158,11,0.06)']}
+            style={styles.optionGradient}
+          >
             <View style={[styles.optionIcon, { backgroundColor: 'rgba(245,158,11,0.15)' }]}>
               <Ionicons name="keypad-outline" size={26} color={Colors.warning} />
             </View>
             <View style={{ flex: 1, gap: 4 }}>
               <Text style={styles.optionTitle}>Inserisci codice</Text>
               <Text style={styles.optionSub}>
-                Digita il codice alfanumerico presente sul mezzo (es. SM-42).
+                Digita il codice alfanumerico presente sul mezzo (es. SM-{vehicleId ?? '42'}).
               </Text>
             </View>
-            <Ionicons
-              name={codeVisible ? 'chevron-up' : 'chevron-down'}
-              size={20}
-              color={Colors.warning}
-            />
-          </View>
+            <Ionicons name="chevron-forward" size={20} color={Colors.warning} />
+          </LinearGradient>
         </TouchableOpacity>
 
-        {/* Input codice espandibile */}
-        {codeVisible && (
-          <View style={styles.codePanel}>
-            <TextInput
-              style={styles.codeInput}
-              placeholder="SM-42 oppure solo 42"
-              placeholderTextColor={Colors.muted}
-              value={code}
-              onChangeText={(t) => { setCode(t); setError(null); }}
-              autoCapitalize="characters"
-              autoCorrect={false}
-              keyboardType="default"
-              returnKeyType="done"
-              onSubmitEditing={handleActivateCode}
-            />
-            {error && (
-              <Text style={styles.errorText}>{error}</Text>
-            )}
-            <TouchableOpacity
-              style={[styles.activateBtn, (!code.trim() || activating) && { opacity: 0.5 }]}
-              onPress={handleActivateCode}
-              disabled={!code.trim() || activating}
-              activeOpacity={0.85}
-            >
-              <LinearGradient
-                colors={['#F59E0B', '#D97706']}
-                start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-                style={styles.activateBtnInner}
-              >
-                {activating
-                  ? <ActivityIndicator color="#000" size="small" />
-                  : <Ionicons name="flash" size={18} color="#000" />}
-                <Text style={styles.activateBtnText}>
-                  {activating ? 'Attivazione...' : 'Attiva corsa'}
-                </Text>
-              </LinearGradient>
-            </TouchableOpacity>
-
-            {/* Link ai codici di test */}
-            <TouchableOpacity
-              style={styles.testCodesLink}
-              onPress={() => router.push('/(app)/activate')}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="qr-code-outline" size={14} color={Colors.accent} />
-              <Text style={styles.testCodesLinkText}>Vedi codici QR di test disponibili</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
       </ScrollView>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -308,13 +230,4 @@ const styles = StyleSheet.create({
   optionIcon:      { width: 52, height: 52, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   optionTitle:     { color: Colors.text, fontWeight: '700', fontSize: 15 },
   optionSub:       { color: Colors.muted, fontSize: 12, lineHeight: 17 },
-
-  codePanel:       { marginHorizontal: 16, marginBottom: 10, backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border, borderRadius: 18, padding: 16, gap: 12 },
-  codeInput:       { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.border, borderRadius: 14, paddingHorizontal: 16, paddingVertical: 14, color: Colors.text, fontSize: 18, fontWeight: '700', letterSpacing: 2, textAlign: 'center' },
-  errorText:       { color: Colors.danger, fontSize: 13, textAlign: 'center' },
-  activateBtn:     { borderRadius: 14, overflow: 'hidden' },
-  activateBtnInner:{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14 },
-  activateBtnText: { color: '#000', fontWeight: '800', fontSize: 15 },
-  testCodesLink:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
-  testCodesLinkText:{ color: Colors.accent, fontSize: 13, fontWeight: '500' },
 });

@@ -10,10 +10,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Colors, Gradients } from '@/constants/theme';
 import VehicleCard, { Vehicle } from '@/components/ui/VehicleCard';
-import { vehiclesApi, ridesApi, geoApi } from '@/lib/api/endpoints';
+import { vehiclesApi, geoApi } from '@/lib/api/endpoints';
 import type { ApiVehicle, ApiRouteOption } from '@/lib/api/types';
-import { useAuth } from '@/lib/auth/AuthContext';
-import { useRideSession } from '@/lib/ride/RideSessionContext';
 import { useSearch } from '@/lib/search/SearchContext';
 import { useDeviceLocation } from '@/lib/useDeviceLocation';
 import { haversineMeters, walkMinutes } from '@/lib/geo';
@@ -31,11 +29,25 @@ const DARK_MAP_STYLE = [
 
 interface Destination { label: string; lat: number; lng: number; }
 
-type TypeFilter     = 'tutti' | 'scooter' | 'ebike' | 'bike';
+type TypeFilter     = 'tutti' | 'scooter' | 'ebike' | 'car';
 type BatteryFilter  = 'tutti' | '50' | '70';
 type DistanceFilter = 'tutti' | '200' | '500';
 
 const MAX_VEHICLES = 60;
+const VEHICLE_TYPE_FILTERS: TypeFilter[] = ['tutti', 'scooter', 'ebike', 'car'];
+
+function vehicleTypeIcon(type: string): keyof typeof MaterialCommunityIcons.glyphMap {
+  if (type === 'scooter') return 'scooter';
+  if (type === 'ebike') return 'bicycle-electric';
+  return 'car-electric';
+}
+
+function vehicleTypeText(type: string) {
+  if (type === 'scooter') return 'Monopattino';
+  if (type === 'ebike') return 'E-Bike';
+  if (type === 'car') return 'Auto elettrica';
+  return 'Mezzo elettrico';
+}
 
 // Raggio massimo (km) entro cui mostrare i mezzi disponibili nella lista "Mezzi disponibili".
 // Configurabile: cambiare qui per ampliare/restringere l'area di ricerca.
@@ -103,8 +115,6 @@ function computePercorsoVeloce(
 
 export default function SearchScreen() {
   const params = useLocalSearchParams<{ q?: string; destLat?: string; destLng?: string }>();
-  const { token } = useAuth();
-  const { startSession } = useRideSession();
   const { coords, status: locationStatus } = useDeviceLocation();
   // Query e destinazione condivise con la Home via SearchContext.
   const { query, setQuery, destination: ctxDestination, setDestination: setCtxDestination, clearDestination } = useSearch();
@@ -224,31 +234,39 @@ export default function SearchScreen() {
     setPercorsoVeloceVisible(false);
   }, [destination?.lat, destination?.lng]);
 
-  const startRide = async (vehicle: Vehicle) => {
-    const opt = optimalFor(vehicle.type);
-    try {
-      if (token) {
-        const ride = await ridesApi.start(token, {
-          vehicle_id: Number(vehicle.id),
-          vehicle_type: vehicle.type,
-          from_addr: 'Posizione attuale',
-          to_addr: destination?.label ?? '',
-        });
-        startSession(ride);
-        router.push({
-          pathname: '/(app)/active-ride',
-          params: {
-            rideId: String(ride.id),
-            vehicleId: vehicle.id,
-            fromLat: String(origin.latitude), fromLng: String(origin.longitude),
-            ...(destination ? { toLat: String(destination.lat), toLng: String(destination.lng), dest: destination.label } : {}),
-            ...(opt ? { km: String(vehicle.tripKm), durMin: String(opt.duration_min) } : {}),
-          },
-        });
-        return;
-      }
-    } catch { /* prosegue comunque */ }
-    router.push('/(app)/active-ride');
+  // Naviga ad activate.tsx per richiedere QR / codice prima di avviare la corsa.
+  // La destinazione è opzionale: se non è stata inserita, la corsa parte senza percorso.
+  const handleIniziaCorsa = (vehicle: Vehicle) => {
+    router.push({
+      pathname: '/(app)/activate',
+      params: {
+        prefill: `SM-${vehicle.id}`,
+        fromLat: String(origin.latitude),
+        fromLng: String(origin.longitude),
+        ...(destination ? {
+          toAddr: destination.label,
+          toLat: String(destination.lat),
+          toLng: String(destination.lng),
+        } : {}),
+      },
+    });
+  };
+
+  // Naviga a reserve.tsx per prenotare il mezzo selezionato.
+  const handlePrenota = (vehicle: Vehicle) => {
+    router.push({
+      pathname: '/(app)/reserve',
+      params: {
+        vehicleId: vehicle.id,
+        fromLat: String(origin.latitude),
+        fromLng: String(origin.longitude),
+        ...(destination ? {
+          toAddr: destination.label,
+          toLat: String(destination.lat),
+          toLng: String(destination.lng),
+        } : {}),
+      },
+    });
   };
 
   // Estensione UC CercaDestinazione → VisualizzaMezzoIdoneo: calcola e mostra
@@ -518,7 +536,7 @@ export default function SearchScreen() {
             )
           ) : filteredVehicles.length === 0 ? (
             <View style={styles.emptyState}>
-              <Ionicons name="bicycle-outline" size={40} color={Colors.muted} />
+              <Ionicons name="car-sport-outline" size={40} color={Colors.muted} />
               <Text style={styles.emptyText}>Nessun mezzo disponibile entro {DEFAULT_SEARCH_RADIUS_KM} km</Text>
             </View>
           ) : (
@@ -550,16 +568,22 @@ export default function SearchScreen() {
             <Text style={styles.bottomBarDetails}>
               {selOptimal ? `${selected.tripKm} km · ${selOptimal.duration_min} min` : `${selected.distanceToM}m a piedi`}
             </Text>
-          </View>
-          <View style={styles.bottomBarRight}>
             <Text style={styles.bottomBarPrice}>€ {selected.estimatedEur.toFixed(2)}</Text>
           </View>
-          <TouchableOpacity style={styles.startBtn} onPress={() => startRide(selected)} activeOpacity={0.85} disabled={!destination}>
-            <LinearGradient colors={destination ? Gradients.primaryBtn : ['#2A2A40', '#22223A']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.startBtnGradient}>
-              <Text style={[styles.startBtnText, !destination && { color: Colors.muted }]}>{destination ? 'Inizia corsa' : 'Scegli meta'}</Text>
-              <Ionicons name="arrow-forward" size={18} color={destination ? Colors.text : Colors.muted} />
-            </LinearGradient>
-          </TouchableOpacity>
+          <View style={styles.bottomBarBtns}>
+            <TouchableOpacity style={styles.prenotaBtn} onPress={() => handlePrenota(selected)} activeOpacity={0.85}>
+              <LinearGradient colors={['#1e3a5f', '#0f2744']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.startBtnGradient}>
+                <Ionicons name="bookmark-outline" size={17} color={Colors.text} />
+                <Text style={styles.startBtnText}>Prenota</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.startBtn} onPress={() => handleIniziaCorsa(selected)} activeOpacity={0.85}>
+              <LinearGradient colors={Gradients.primaryBtn} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.startBtnGradient}>
+                <Ionicons name="qr-code-outline" size={17} color={Colors.text} />
+                <Text style={styles.startBtnText}>Inizia corsa</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
         </View>
       )}
 
@@ -631,10 +655,10 @@ export default function SearchScreen() {
             </View>
             <Text style={styles.filterSectionLabel}>TIPO DI MEZZO</Text>
             <View style={styles.chipRow}>
-              {(['tutti', 'scooter', 'ebike', 'bike'] as TypeFilter[]).map(t => (
+              {VEHICLE_TYPE_FILTERS.map(t => (
                 <TouchableOpacity key={t} style={[styles.chip, pendingType === t && styles.chipActive]} onPress={() => setPendingType(t)} activeOpacity={0.75}>
                   <Text style={[styles.chipText, pendingType === t && styles.chipTextActive]}>
-                    {t === 'tutti' ? 'Tutti' : t === 'scooter' ? 'Monopattino' : t === 'ebike' ? 'E-Bike' : 'Bici'}
+                    {t === 'tutti' ? 'Tutti' : vehicleTypeText(t)}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -739,10 +763,9 @@ export default function SearchScreen() {
               style={styles.idoneoStartBtn}
               onPress={() => {
                 setIdoneoVisible(false);
-                startRide(idoneoVehicle);
+                handleIniziaCorsa(idoneoVehicle);
               }}
               activeOpacity={0.85}
-              disabled={!destination}
             >
               <LinearGradient colors={Gradients.primaryBtn} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
                 style={styles.idoneoStartGradient}>
@@ -805,11 +828,7 @@ export default function SearchScreen() {
                 <View style={styles.percorsoVehicleBanner}>
                   <View style={styles.percorsoVehicleBannerIcon}>
                     <MaterialCommunityIcons
-                      name={
-                        percorsoVeloce.vehicleType === 'scooter' ? 'scooter' :
-                        percorsoVeloce.vehicleType === 'ebike'   ? 'bicycle-electric' :
-                        percorsoVeloce.vehicleType === 'bike'    ? 'bicycle' : 'car-electric'
-                      }
+                      name={vehicleTypeIcon(percorsoVeloce.vehicleType)}
                       size={22}
                       color={Colors.accent}
                     />
@@ -836,18 +855,12 @@ export default function SearchScreen() {
               {/* Vehicle type row */}
               <View style={styles.percorsoTypeRow}>
                 <MaterialCommunityIcons
-                  name={
-                    percorsoVeloce.vehicleType === 'scooter' ? 'scooter' :
-                    percorsoVeloce.vehicleType === 'ebike'   ? 'bicycle-electric' :
-                    percorsoVeloce.vehicleType === 'bike'    ? 'bicycle' : 'car-electric'
-                  }
+                  name={vehicleTypeIcon(percorsoVeloce.vehicleType)}
                   size={22}
                   color={Colors.accent}
                 />
                 <Text style={styles.percorsoTypeLabel}>
-                  {percorsoVeloce.vehicleType === 'scooter' ? 'Monopattino' :
-                   percorsoVeloce.vehicleType === 'ebike'   ? 'E-Bike' :
-                   percorsoVeloce.vehicleType === 'bike'    ? 'Bicicletta' : 'Auto elettrica'}
+                  {vehicleTypeText(percorsoVeloce.vehicleType)}
                 </Text>
                 {percorsoVeloce.route.restricted && (
                   <View style={styles.restrictedPill}>
@@ -938,14 +951,12 @@ export default function SearchScreen() {
               style={styles.idoneoStartBtn}
               onPress={() => {
                 setPercorsoVeloceVisible(false);
-                // Select the best vehicle of the recommended type and start ride
                 const bestForType = filteredVehicles.find(
                   v => v.type === percorsoVeloce.vehicleType
                 ) ?? filteredVehicles[0];
-                if (bestForType) startRide(bestForType);
+                if (bestForType) handleIniziaCorsa(bestForType);
               }}
               activeOpacity={0.85}
-              disabled={!destination}
             >
               <LinearGradient
                 colors={['#1e3a5f', '#0f2744']}
@@ -1001,16 +1012,18 @@ const styles = StyleSheet.create({
   emptyState:          { alignItems: 'center', gap: 8, paddingVertical: 40, marginHorizontal: 16 },
   emptyText:           { color: Colors.text, fontWeight: '600', fontSize: 15 },
 
-  bottomBar:           { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: Colors.card, borderTopWidth: 1, borderTopColor: Colors.border, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  bottomBarInfo:       { flex: 1, gap: 2 },
+  bottomBar:           { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: Colors.card, borderTopWidth: 1, borderTopColor: Colors.border, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 28, gap: 10 },
+  bottomBarInfo:       { flexDirection: 'row', alignItems: 'center', gap: 8 },
   bottomBarName:       { color: Colors.text, fontWeight: '700', fontSize: 14 },
-  bottomBarModel:      { color: Colors.muted, fontSize: 12 },
+  bottomBarModel:      { color: Colors.muted, fontSize: 12, flex: 1 },
   bottomBarDetails:    { color: Colors.muted, fontSize: 11 },
   bottomBarRight:      { alignItems: 'flex-end', gap: 2 },
-  bottomBarPrice:      { color: Colors.accent, fontWeight: '800', fontSize: 18 },
-  startBtn:            { borderRadius: 14, overflow: 'hidden' },
-  startBtnGradient:    { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 14, paddingHorizontal: 20 },
-  startBtnText:        { color: Colors.text, fontWeight: '700', fontSize: 15 },
+  bottomBarPrice:      { color: Colors.accent, fontWeight: '800', fontSize: 16, marginLeft: 'auto' },
+  bottomBarBtns:       { flexDirection: 'row', gap: 10 },
+  prenotaBtn:          { flex: 1, borderRadius: 14, overflow: 'hidden' },
+  startBtn:            { flex: 1.3, borderRadius: 14, overflow: 'hidden' },
+  startBtnGradient:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 14, paddingHorizontal: 12 },
+  startBtnText:        { color: Colors.text, fontWeight: '700', fontSize: 14 },
 
   searchModal:         { position: 'absolute', top: 0, left: 0, right: 0, borderBottomLeftRadius: 28, borderBottomRightRadius: 28, overflow: 'hidden', borderWidth: 1, borderTopWidth: 0, borderColor: 'rgba(167,139,250,0.25)' },
   searchModalBg:       { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(8,8,24,0.88)' },

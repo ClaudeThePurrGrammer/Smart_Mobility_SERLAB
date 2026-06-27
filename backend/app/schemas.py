@@ -1,7 +1,8 @@
 """Schemi Pydantic — contratto REST View_to_Controller (HTTPS/JSON)."""
-from datetime import datetime
+import re
+from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
 
 # ─── Auth ───────────────────────────────────────────────────────────────────
@@ -16,6 +17,15 @@ class RegisterIn(BaseModel):
     # Campi profilo specifici per ruolo (opzionali).
     ente_appartenenza: str | None = None   # AMMINISTRAZIONE
     zona_competenza: str | None = None      # OPERATORE
+    # [V] Codice placeholder 5 cifre — obbligatorio per OPERATORE/AMMINISTRAZIONE.
+    codice_attivazione: str | None = None
+
+    @model_validator(mode="after")
+    def _check_codice_attivazione(self) -> "RegisterIn":
+        if self.role in ("OPERATORE", "AMMINISTRAZIONE"):
+            if not self.codice_attivazione or not re.fullmatch(r"\d{5}", self.codice_attivazione):
+                raise ValueError("Il codice di attivazione deve essere di esattamente 5 cifre numeriche")
+        return self
 
 
 class LoginIn(BaseModel):
@@ -246,6 +256,7 @@ class ReportIn(BaseModel):
     ride_id: int | None = None
     gps_lat: float | None = None
     gps_lng: float | None = None
+    attachments: list[str] = []
 
 
 class ReportOut(BaseModel):
@@ -255,6 +266,9 @@ class ReportOut(BaseModel):
     category: str
     description: str
     status: str = Field(validation_alias="stato")
+    tipo: str = "ALTRO"
+    gravita: str = "MEDIA"
+    attachments: list[str] = []
     created_at: datetime
 
 
@@ -271,11 +285,44 @@ class SegnalazioneOut(BaseModel):
     stato: str
     gps_lat: float | None
     gps_lng: float | None
+    zona: str | None = None
     created_at: datetime
     closed_at: datetime | None
 
 
+# ─── Segnala Zona (UC-19) ────────────────────────────────────────────────────
+class SegnalazioneZonaIn(BaseModel):
+    zona: str = Field(min_length=3, max_length=200)
+    descrizione: str = Field(default="", max_length=1000)
+    valida_dal: date
+    valida_al: date
+    gps_lat: float | None = None
+    gps_lng: float | None = None
+    gravita: str = Field(default="MEDIA")
+
+    @model_validator(mode="after")
+    def _check_period(self) -> "SegnalazioneZonaIn":
+        if self.valida_al < self.valida_dal:
+            raise ValueError("La data di fine deve essere uguale o successiva alla data di inizio")
+        if self.gravita not in {"BASSA", "MEDIA", "ALTA"}:
+            raise ValueError("Gravità non valida. Valori ammessi: BASSA, MEDIA, ALTA")
+        return self
+
+
+class SegnalazioneZonaOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    zona: str | None
+    descrizione: str
+    valida_dal: date | None
+    valida_al: date | None
+    gps_lat: float | None
+    created_at: datetime
+
+
 # ─── Aree di restrizione ──────────────────────────────────────────────────────
+_TIPI_RESTRIZIONE = {"NO_GO", "NO_PARKING", "ZTL", "PEDONALE", "LIMITE_VELOCITA"}
+_VEICOLI_VALIDI   = {"scooter", "bike", "ebike", "car"}
 class AreaRestrizioneIn(BaseModel):
     nome: str
     tipo: str = "NO_GO"
@@ -286,6 +333,30 @@ class AreaRestrizioneIn(BaseModel):
     orario: str | None = None
     attiva: bool = True
     note: str = ""
+
+
+class AreaRestrizioneConfiguraIn(BaseModel):
+    """Input UC-21: indirizzo da geocodificare → area a cerchio con periodo di validità."""
+    indirizzo: str = Field(min_length=3, max_length=200)
+    radius_m: int = Field(default=100, ge=1, le=50000)
+    tipo: str = "NO_GO"
+    vehicle_types: list[str] = Field(default_factory=list)
+    note: str = Field(default="", max_length=1000)
+    valida_dal: date | None = None
+    valida_al: date | None = None
+
+    @model_validator(mode="after")
+    def _validate(self) -> "AreaRestrizioneConfiguraIn":
+        if self.tipo not in _TIPI_RESTRIZIONE:
+            raise ValueError(f"Tipo non valido. Valori ammessi: {', '.join(sorted(_TIPI_RESTRIZIONE))}")
+        if not self.vehicle_types:
+            raise ValueError("Selezionare almeno una tipologia di mezzo")
+        invalid = [v for v in self.vehicle_types if v not in _VEICOLI_VALIDI]
+        if invalid:
+            raise ValueError(f"Tipologie non valide: {', '.join(invalid)}")
+        if self.valida_dal and self.valida_al and self.valida_al < self.valida_dal:
+            raise ValueError("La data di fine deve essere uguale o successiva alla data di inizio")
+        return self
 
 
 class AreaRestrizioneUpdate(BaseModel):
@@ -312,11 +383,14 @@ class AreaRestrizioneOut(BaseModel):
     orario: str | None
     attiva: bool
     note: str
+    valida_dal: date | None = None
+    valida_al: date | None = None
 
 
 # ─── Azioni Operatore ─────────────────────────────────────────────────────────
 class AccountStatusIn(BaseModel):
     account_status: str  # ATTIVO | SOSPESO | BLOCCATO
+    motivo: str          # motivazione obbligatoria per il log e la notifica all'utente
 
 
 class VehicleLockIn(BaseModel):

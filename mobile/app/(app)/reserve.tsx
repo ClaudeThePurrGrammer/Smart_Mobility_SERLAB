@@ -13,15 +13,14 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Colors, Gradients } from '@/constants/theme';
 import { useAuth } from '@/lib/auth/AuthContext';
-import { useRideSession } from '@/lib/ride/RideSessionContext';
 import { useReservationSession } from '@/lib/reservation/ReservationSessionContext';
-import { vehiclesApi, ridesApi, reservationsApi, paymentApi, walletApi, geoApi } from '@/lib/api/endpoints';
+import { vehiclesApi, reservationsApi, paymentApi, walletApi, geoApi } from '@/lib/api/endpoints';
 import { vehicleIcon, vehicleTypeLabel } from '@/lib/vehicles';
 import { haversineMeters, formatDistance } from '@/lib/geo';
 import type { ApiVehicle, ApiPaymentMethod, ApiRoutePoint, ApiGeocodeResult } from '@/lib/api/types';
 
 // Velocità media di marcia per tipo di mezzo (km/h) → stima del tempo di percorrenza.
-const SPEED_KMH: Record<string, number> = { scooter: 18, ebike: 20, bike: 14, car: 30 };
+const SPEED_KMH: Record<string, number> = { scooter: 18, ebike: 20, car: 30 };
 // Durata stimata di default quando non è ancora stata scelta una destinazione (minuti).
 const EST_MINUTES = 15;
 
@@ -44,8 +43,7 @@ function routeMeters(points: ApiRoutePoint[]): number {
 interface Destination { label: string; lat: number; lng: number; }
 
 export default function ReserveScreen() {
-  const { token, refreshUser } = useAuth();
-  const { startSession } = useRideSession();
+  const { token } = useAuth();
   const { startReservation } = useReservationSession();
   const { vehicleId, fromLat, fromLng, toAddr, toLat, toLng } = useLocalSearchParams<{
     vehicleId?: string; fromLat?: string; fromLng?: string;
@@ -64,6 +62,7 @@ export default function ReserveScreen() {
   const [balance, setBalance] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [confirming, setConfirming] = useState(false);
+  const [reserveError, setReserveError] = useState<string | null>(null);
 
   // Destinazione + percorso calcolato (pre-popolata dai params se presenti)
   const [destination, setDestination] = useState<Destination | null>(paramDestination);
@@ -88,8 +87,11 @@ export default function ReserveScreen() {
   // così una meta scelta nella Home viene mostrata, ma nessuna meta "vecchia"
   // di una sessione precedente sopravvive. NON tocchiamo il veicolo (dai params)
   // né la posizione di partenza (GPS reale).
+  // Resettiamo anche confirming/reserveError per evitare spinner infinito al ritorno.
   useFocusEffect(
     useCallback(() => {
+      setConfirming(false);
+      setReserveError(null);
       setDestination(
         (toAddr && toLat && toLng)
           ? { label: toAddr, lat: Number(toLat), lng: Number(toLng) }
@@ -200,38 +202,23 @@ export default function ReserveScreen() {
     setResults([]);
   };
 
-  const handleStartRide = async () => {
-    if (!vehicle || confirming) return;
-    setConfirming(true);
-    try {
-      if (token) {
-        const ride = await ridesApi.start(token, {
-          vehicle_id: vehicle.id,
-          vehicle_type: vehicle.type,
-          from_addr: 'Posizione attuale',
-          ...(destination ? { to_addr: destination.label } : {}),
-        });
-        await refreshUser?.();
-        startSession(ride);
-        router.replace({
-          pathname: '/(app)/active-ride',
-          params: {
-            rideId: String(ride.id),
-            vehicleId: String(vehicle.id),
-            ...(userCoords ? { fromLat: String(userCoords.latitude), fromLng: String(userCoords.longitude) } : {}),
-            ...(destination ? { toLat: String(destination.lat), toLng: String(destination.lng) } : {}),
-          },
-        });
-        return;
-      }
-      router.replace('/(app)/active-ride');
-    } catch {
-      setConfirming(false);
-    }
+  // Avvia subito → porta alla scansione QR / inserimento codice.
+  // La corsa NON parte mai direttamente: richiede conferma fisica sul mezzo.
+  const handleAvviaSubito = () => {
+    if (!vehicle) return;
+    router.push({
+      pathname: '/(app)/activate',
+      params: {
+        prefill: `SM-${vehicle.id}`,
+        ...(userCoords ? { fromLat: String(userCoords.latitude), fromLng: String(userCoords.longitude) } : {}),
+        ...(destination ? { toAddr: destination.label, toLat: String(destination.lat), toLng: String(destination.lng) } : {}),
+      },
+    });
   };
 
   const handleReserve = async () => {
     if (!vehicle || confirming || !token) return;
+    setReserveError(null);
     setConfirming(true);
     try {
       const res = await reservationsApi.create(token, vehicle.id);
@@ -250,7 +237,17 @@ export default function ReserveScreen() {
           ...(destination ? { toAddr: destination.label, toLat: String(destination.lat), toLng: String(destination.lng) } : {}),
         },
       });
-    } catch {
+    } catch (e: any) {
+      const s: number | undefined = e?.status;
+      const msg: string = e?.message ?? '';
+      if (s === 409 || msg.includes('409')) {
+        setReserveError('Hai già una prenotazione attiva o una corsa in corso.');
+      } else if (msg.toLowerCase().includes('disponibile') || msg.toLowerCase().includes('uso')) {
+        setReserveError('Il mezzo non è più disponibile.');
+      } else {
+        setReserveError('Impossibile creare la prenotazione. Riprova.');
+      }
+    } finally {
       setConfirming(false);
     }
   };
@@ -420,6 +417,14 @@ export default function ReserveScreen() {
             </View>
           </ScrollView>
 
+          {/* Errore prenotazione (sopra i pulsanti CTA) */}
+          {reserveError && (
+            <View style={styles.errorBox}>
+              <Ionicons name="alert-circle" size={16} color={Colors.danger} />
+              <Text style={styles.errorBoxText}>{reserveError}</Text>
+            </View>
+          )}
+
           {/* CTA */}
           <View style={styles.footer}>
             <TouchableOpacity style={styles.reserveBtn} onPress={handleReserve} disabled={confirming} activeOpacity={0.85}>
@@ -432,9 +437,9 @@ export default function ReserveScreen() {
                     </>}
               </LinearGradient>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.startBtn} onPress={handleStartRide} disabled={confirming} activeOpacity={0.85}>
+            <TouchableOpacity style={styles.startBtn} onPress={handleAvviaSubito} disabled={!vehicle} activeOpacity={0.85}>
               <LinearGradient colors={['#10b981', '#059669']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.btnGradient}>
-                <Ionicons name="flash" size={18} color={Colors.text} />
+                <Ionicons name="qr-code-outline" size={18} color={Colors.text} />
                 <Text style={styles.btnText}>Avvia subito</Text>
               </LinearGradient>
             </TouchableOpacity>
@@ -547,6 +552,8 @@ const styles = StyleSheet.create({
   payLabel:         { color: Colors.text, fontSize: 15, fontWeight: '600' },
   paySub:           { color: Colors.muted, fontSize: 12, marginTop: 2 },
 
+  errorBox:    { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginBottom: 8, backgroundColor: 'rgba(239,68,68,0.1)', borderWidth: 1, borderColor: Colors.danger, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 },
+  errorBoxText:{ color: Colors.danger, fontSize: 13, fontWeight: '500', flex: 1 },
   footer:      { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 28, borderTopWidth: 1, borderTopColor: Colors.border, backgroundColor: Colors.card },
   reserveBtn:  { flex: 1.4, borderRadius: 16, overflow: 'hidden' },
   startBtn:    { flex: 1, borderRadius: 16, overflow: 'hidden' },

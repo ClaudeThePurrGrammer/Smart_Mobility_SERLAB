@@ -18,7 +18,7 @@ _HEADERS = {"User-Agent": "SmartMobility-SERLAB/1.0 (university project)"}
 _TIMEOUT = 10
 
 # Velocità media di marcia per tipo di mezzo (km/h) → stima tempo di percorrenza.
-_SPEED_KMH = {"scooter": 18.0, "ebike": 20.0, "bike": 14.0, "car": 30.0}
+_SPEED_KMH = {"scooter": 18.0, "ebike": 20.0, "car": 30.0}
 # Tipi di area che vietano il transito (a differenza di NO_PARKING che riguarda solo la sosta).
 _AREE_VIETATE_TRANSITO = {"NO_GO", "ZTL", "PEDONALE"}
 

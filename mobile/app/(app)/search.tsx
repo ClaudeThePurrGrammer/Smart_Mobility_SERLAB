@@ -1,7 +1,7 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
-  StyleSheet, Dimensions, Animated, Easing, ActivityIndicator,
+  StyleSheet, Dimensions, Animated, Easing, ActivityIndicator, Alert,
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import { BlurView } from 'expo-blur';
@@ -10,8 +10,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Colors, Gradients } from '@/constants/theme';
 import VehicleCard, { Vehicle } from '@/components/ui/VehicleCard';
-import { vehiclesApi, geoApi } from '@/lib/api/endpoints';
+import { vehiclesApi, geoApi, restrizioniApi } from '@/lib/api/endpoints';
 import type { ApiVehicle, ApiRouteOption } from '@/lib/api/types';
+import { useAuth } from '@/lib/auth/AuthContext';
 import { useSearch } from '@/lib/search/SearchContext';
 import { useDeviceLocation } from '@/lib/useDeviceLocation';
 import { haversineMeters, walkMinutes } from '@/lib/geo';
@@ -117,6 +118,7 @@ export default function SearchScreen() {
   const params = useLocalSearchParams<{ q?: string; destLat?: string; destLng?: string }>();
   const { coords, status: locationStatus } = useDeviceLocation();
   // Query e destinazione condivise con la Home via SearchContext.
+  const { token } = useAuth();
   const { query, setQuery, destination: ctxDestination, setDestination: setCtxDestination, clearDestination } = useSearch();
 
   const origin = coords ?? DEFAULT_CENTER;
@@ -227,6 +229,35 @@ export default function SearchScreen() {
     setSelected((cur) => allVehicles.find((v) => v.id === cur?.id) ?? allVehicles[0] ?? null);
   }, [allVehicles]);
 
+  // ── Verifica restrizioni sulla destinazione (AP.04) ────────────────────────
+  // Se la meta scelta ricade in un'area di restrizione attiva per il mezzo,
+  // la corsa non è avviabile (notifica + pulsanti bloccati).
+  const [restriction, setRestriction] = useState<{ restricted: boolean; aree: { id: number; nome: string; tipo: string }[] } | null>(null);
+  useEffect(() => {
+    if (!destination || !token) { setRestriction(null); return; }
+    let active = true;
+    restrizioniApi.verifica(token, destination.lat, destination.lng, selected?.type)
+      .then((r) => { if (active) setRestriction(r); })
+      .catch(() => { if (active) setRestriction(null); });
+    return () => { active = false; };
+  }, [destination?.lat, destination?.lng, selected?.type, token]);
+
+  const destBloccata = restriction?.restricted === true;
+  const restrNomi = (restriction?.aree ?? []).map((a) => a.nome).join(', ');
+
+  // Mostra la notifica di blocco e impedisce l'avvio quando la meta è ristretta.
+  const bloccaSeRistretta = (): boolean => {
+    if (destBloccata) {
+      Alert.alert(
+        'Zona soggetta a restrizione',
+        `La destinazione ricade in un'area di restrizione attiva${restrNomi ? ` (${restrNomi})` : ''}. Non è possibile avviare una corsa verso questa zona con il mezzo selezionato.`,
+        [{ text: 'Ho capito' }],
+      );
+      return true;
+    }
+    return false;
+  };
+
   // Reset del mezzo idoneo / percorso veloce quando cambia la destinazione.
   useEffect(() => {
     setIdoneoVehicle(null);
@@ -238,6 +269,7 @@ export default function SearchScreen() {
   // Naviga ad activate.tsx per richiedere QR / codice prima di avviare la corsa.
   // La destinazione è opzionale: se non è stata inserita, la corsa parte senza percorso.
   const handleIniziaCorsa = (vehicle: Vehicle) => {
+    if (bloccaSeRistretta()) return;
     router.push({
       pathname: '/(app)/activate',
       params: {
@@ -255,6 +287,7 @@ export default function SearchScreen() {
 
   // Naviga a reserve.tsx per prenotare il mezzo selezionato.
   const handlePrenota = (vehicle: Vehicle) => {
+    if (bloccaSeRistretta()) return;
     router.push({
       pathname: '/(app)/reserve',
       params: {
@@ -562,28 +595,38 @@ export default function SearchScreen() {
 
       {/* Bottom bar */}
       {selected && (
-        <View style={styles.bottomBar}>
-          <View style={styles.bottomBarInfo}>
-            <Text style={styles.bottomBarName}>{selected.name}</Text>
-            <Text style={styles.bottomBarModel}>{selected.model}</Text>
-            <Text style={styles.bottomBarDetails}>
-              {selOptimal ? `${selected.tripKm} km · ${selOptimal.duration_min} min` : `${selected.distanceToM}m a piedi`}
-            </Text>
-            <Text style={styles.bottomBarPrice}>€ {selected.estimatedEur.toFixed(2)}</Text>
-          </View>
-          <View style={styles.bottomBarBtns}>
-            <TouchableOpacity style={styles.prenotaBtn} onPress={() => handlePrenota(selected)} activeOpacity={0.85}>
-              <LinearGradient colors={['#1e3a5f', '#0f2744']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.startBtnGradient}>
-                <Ionicons name="bookmark-outline" size={17} color={Colors.text} />
-                <Text style={styles.startBtnText}>Prenota</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.startBtn} onPress={() => handleIniziaCorsa(selected)} activeOpacity={0.85}>
-              <LinearGradient colors={Gradients.primaryBtn} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.startBtnGradient}>
-                <Ionicons name="qr-code-outline" size={17} color={Colors.text} />
-                <Text style={styles.startBtnText}>Inizia corsa</Text>
-              </LinearGradient>
-            </TouchableOpacity>
+        <View style={styles.bottomBarWrap}>
+          {destBloccata && (
+            <View style={styles.restrBanner}>
+              <Ionicons name="ban" size={16} color={Colors.danger} />
+              <Text style={styles.restrBannerText} numberOfLines={2}>
+                Destinazione in area di restrizione{restrNomi ? ` (${restrNomi})` : ''}: corsa non avviabile.
+              </Text>
+            </View>
+          )}
+          <View style={styles.bottomBar}>
+            <View style={styles.bottomBarInfo}>
+              <Text style={styles.bottomBarName}>{selected.name}</Text>
+              <Text style={styles.bottomBarModel}>{selected.model}</Text>
+              <Text style={styles.bottomBarDetails}>
+                {selOptimal ? `${selected.tripKm} km · ${selOptimal.duration_min} min` : `${selected.distanceToM}m a piedi`}
+              </Text>
+              <Text style={styles.bottomBarPrice}>€ {selected.estimatedEur.toFixed(2)}</Text>
+            </View>
+            <View style={styles.bottomBarBtns}>
+              <TouchableOpacity style={[styles.prenotaBtn, destBloccata && styles.btnBlocked]} onPress={() => handlePrenota(selected)} activeOpacity={0.85}>
+                <LinearGradient colors={['#1e3a5f', '#0f2744']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.startBtnGradient}>
+                  <Ionicons name="bookmark-outline" size={17} color={Colors.text} />
+                  <Text style={styles.startBtnText}>Prenota</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.startBtn, destBloccata && styles.btnBlocked]} onPress={() => handleIniziaCorsa(selected)} activeOpacity={0.85}>
+                <LinearGradient colors={destBloccata ? ['#3a2230', '#2a1822'] : Gradients.primaryBtn} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.startBtnGradient}>
+                  <Ionicons name={destBloccata ? 'ban' : 'qr-code-outline'} size={17} color={Colors.text} />
+                  <Text style={styles.startBtnText}>Inizia corsa</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       )}
@@ -1013,7 +1056,11 @@ const styles = StyleSheet.create({
   emptyState:          { alignItems: 'center', gap: 8, paddingVertical: 40, marginHorizontal: 16 },
   emptyText:           { color: Colors.text, fontWeight: '600', fontSize: 15 },
 
-  bottomBar:           { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: Colors.card, borderTopWidth: 1, borderTopColor: Colors.border, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 28, gap: 10 },
+  bottomBarWrap:       { position: 'absolute', bottom: 0, left: 0, right: 0 },
+  bottomBar:           { backgroundColor: Colors.card, borderTopWidth: 1, borderTopColor: Colors.border, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 28, gap: 10 },
+  restrBanner:         { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(239,68,68,0.15)', borderTopWidth: 1, borderColor: Colors.danger, paddingHorizontal: 16, paddingVertical: 10 },
+  restrBannerText:     { color: Colors.danger, fontSize: 12, fontWeight: '600', flex: 1 },
+  btnBlocked:          { opacity: 0.6 },
   bottomBarInfo:       { flexDirection: 'row', alignItems: 'center', gap: 8 },
   bottomBarName:       { color: Colors.text, fontWeight: '700', fontSize: 14 },
   bottomBarModel:      { color: Colors.muted, fontSize: 12, flex: 1 },

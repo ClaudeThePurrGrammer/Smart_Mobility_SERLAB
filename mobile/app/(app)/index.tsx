@@ -12,8 +12,8 @@ import { Colors, Gradients } from '@/constants/theme';
 import { useDeviceLocation } from '@/lib/useDeviceLocation';
 import { vehicleIcon, toMapVehicle, type MapVehicle } from '@/lib/vehicles';
 import { haversineMeters, formatDistance } from '@/lib/geo';
-import { vehiclesApi, geoApi, parkingApi } from '@/lib/api/endpoints';
-import type { ApiGeocodeResult, ApiParkingArea } from '@/lib/api/types';
+import { vehiclesApi, geoApi, parkingApi, restrizioniApi } from '@/lib/api/endpoints';
+import type { ApiGeocodeResult, ApiParkingArea, ApiAreaRestrizioneOut } from '@/lib/api/types';
 import { useAuth } from '@/lib/auth/AuthContext';
 import { useRideSession } from '@/lib/ride/RideSessionContext';
 import { useReservationSession } from '@/lib/reservation/ReservationSessionContext';
@@ -91,6 +91,15 @@ export default function HomeScreen() {
       .then(setParkingAreas)
       .catch(() => {});
   }, [coords]);
+
+  // Aree di restrizione (AP.04): mostrate sulla mappa utente come cerchio rosso + "R".
+  const [restrizioniAree, setRestrizioniAree] = useState<ApiAreaRestrizioneOut[]>([]);
+  useEffect(() => {
+    if (!token) return;
+    restrizioniApi.list(token)
+      .then((list) => setRestrizioniAree(list.filter((a) => a.attiva)))
+      .catch(() => {});
+  }, [token]);
 
   // ── Sessione corsa esplicita: banner solo se l'utente ha avviato una corsa ──
   const { session } = useRideSession();
@@ -362,6 +371,28 @@ export default function HomeScreen() {
             >
               <View style={styles.parkingMarker}>
                 <Text style={styles.parkingMarkerText}>P</Text>
+              </View>
+            </Marker>
+          </React.Fragment>
+        ))}
+
+        {/* Aree di restrizione: cerchio rosso + icona quadrata "R" */}
+        {restrizioniAree.map(area => (
+          <React.Fragment key={`restr-${area.id}`}>
+            <Circle
+              center={{ latitude: area.lat, longitude: area.lng }}
+              radius={area.radius_m}
+              strokeColor="#EF4444"
+              strokeWidth={2}
+              fillColor="rgba(239,68,68,0.14)"
+            />
+            <Marker
+              coordinate={{ latitude: area.lat, longitude: area.lng }}
+              tracksViewChanges={false}
+              anchor={{ x: 0.5, y: 0.5 }}
+            >
+              <View style={styles.restrMarker}>
+                <Text style={styles.restrMarkerText}>R</Text>
               </View>
             </Marker>
           </React.Fragment>
@@ -750,6 +781,8 @@ const styles = StyleSheet.create({
   markerParkedSelected:{ backgroundColor: '#10B981', borderColor: '#34D399', transform: [{ scale: 1.15 }] },
   parkingMarker:     { backgroundColor: 'rgba(16,185,129,0.85)', borderWidth: 1.5, borderColor: '#10b981', borderRadius: 8, width: 22, height: 22, alignItems: 'center', justifyContent: 'center' },
   parkingMarkerText: { color: '#fff', fontSize: 11, fontWeight: '800' },
+  restrMarker:       { backgroundColor: 'rgba(13,13,26,0.95)', borderWidth: 2, borderColor: '#EF4444', borderRadius: 6, width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
+  restrMarkerText:   { color: '#EF4444', fontSize: 13, fontWeight: '900' },
 
   // Search modal
   searchModal:       { position: 'absolute', top: 0, left: 0, right: 0, borderBottomLeftRadius: 28, borderBottomRightRadius: 28, overflow: 'hidden', borderWidth: 1, borderTopWidth: 0, borderColor: 'rgba(167,139,250,0.25)' },

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..deps import require_role
+from ..deps import get_current_user, require_role
 from ..models import AreaRestrizione, User
 from ..schemas import AreaRestrizioneConfiguraIn, AreaRestrizioneIn, AreaRestrizioneOut, AreaRestrizioneUpdate
 
@@ -29,7 +29,9 @@ def _meters(lat1, lng1, lat2, lng2) -> float:
 
 
 @router.get("", response_model=list[AreaRestrizioneOut])
-def list_aree(_: User = Depends(_lettura), db: Session = Depends(get_db)):
+def list_aree(_: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Lettura aperta a qualsiasi utente autenticato: le zone di restrizione sono
+    # informazioni pubbliche (mostrate sulla mappa utente come le aree di sosta).
     return db.query(AreaRestrizione).order_by(AreaRestrizione.id).all()
 
 
@@ -38,7 +40,7 @@ def verifica_posizione(
     lat: float = Query(...),
     lng: float = Query(...),
     vehicle_type: str | None = Query(default=None),
-    _: User = Depends(_lettura),
+    _: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Verifica se una posizione ricade in un'area di restrizione attiva per il tipo di mezzo."""
@@ -74,14 +76,21 @@ def configura_area(
     user: User = Depends(_admin),
     db: Session = Depends(get_db),
 ):
-    """UC-21 — Configura un'area di restrizione geocodificando l'indirizzo fornito."""
-    coords = _geocode_first(data.indirizzo)
-    if coords is None:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
-            "Indirizzo non trovato: verifica l'indirizzo e riprova",
-        )
-    lat, lng = coords
+    """UC-21 — Configura un'area di restrizione.
+
+    Se l'amministrazione ha già scelto il punto sulla mappa (lat/lng presenti)
+    si usano quelle coordinate; altrimenti si geocodifica l'indirizzo.
+    """
+    if data.lat is not None and data.lng is not None:
+        lat, lng = data.lat, data.lng
+    else:
+        coords = _geocode_first(data.indirizzo)
+        if coords is None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "Indirizzo non trovato: verifica l'indirizzo e riprova",
+            )
+        lat, lng = coords
     area = AreaRestrizione(
         nome=data.indirizzo[:120],
         tipo=data.tipo,

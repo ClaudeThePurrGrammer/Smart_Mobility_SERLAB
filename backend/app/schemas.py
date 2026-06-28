@@ -349,6 +349,10 @@ class AreaRestrizioneConfiguraIn(BaseModel):
     note: str = Field(default="", max_length=1000)
     valida_dal: date | None = None
     valida_al: date | None = None
+    # Coordinate scelte dall'amministrazione sulla mappa (ricerca per nome →
+    # selezione punto). Se presenti si usano direttamente, saltando il geocoding.
+    lat: float | None = None
+    lng: float | None = None
 
     @model_validator(mode="after")
     def _validate(self) -> "AreaRestrizioneConfiguraIn":

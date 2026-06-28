@@ -191,13 +191,23 @@ export const amministrazioneApi = {
   },
   inserisciAreaRestrizione: (
     token: string,
-    body: { indirizzo: string; radius_m: number; tipo: string; vehicle_types: string[]; note: string; valida_dal: string; valida_al: string },
+    body: { indirizzo: string; radius_m: number; tipo: string; vehicle_types: string[]; note: string; valida_dal: string; valida_al: string; lat?: number; lng?: number },
   ) => apiFetch<ApiAreaRestrizioneOut>('/aree-restrizione/configura', { method: 'POST', body, token }),
   trattePiuUtilizzate: (token: string, vehicleType: string, fromDate?: string, toDate?: string, limit = 10) => {
     let url = `/amministrazione/tratte/frequenza?vehicle_type=${encodeURIComponent(vehicleType)}&limit=${limit}`;
     if (fromDate) url += `&from_date=${encodeURIComponent(fromDate)}`;
     if (toDate)   url += `&to_date=${encodeURIComponent(toDate)}`;
     return apiFetch<ApiTrattaFrequenza[]>(url, { token });
+  },
+};
+
+// ─── Aree di restrizione (lettura aperta a tutti gli utenti autenticati) ────
+export const restrizioniApi = {
+  list: (token: string) => apiFetch<ApiAreaRestrizioneOut[]>('/aree-restrizione', { token }),
+  verifica: (token: string, lat: number, lng: number, vehicleType?: string) => {
+    let url = `/aree-restrizione/verifica?lat=${lat}&lng=${lng}`;
+    if (vehicleType) url += `&vehicle_type=${encodeURIComponent(vehicleType)}`;
+    return apiFetch<{ restricted: boolean; aree: { id: number; nome: string; tipo: string }[] }>(url, { token });
   },
 };
 

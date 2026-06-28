@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  KeyboardAvoidingView, Platform, ScrollView, StyleSheet,
+  ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet,
   Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
+import MapView, { Circle, Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,7 +12,19 @@ import { Colors } from '@/constants/theme';
 import { useAuth } from '@/lib/auth/AuthContext';
 import GlassCard from '@/components/ui/GlassCard';
 import GradientButton from '@/components/ui/GradientButton';
-import { amministrazioneApi } from '@/lib/api/endpoints';
+import { amministrazioneApi, geoApi } from '@/lib/api/endpoints';
+import type { ApiGeocodeResult } from '@/lib/api/types';
+
+// Stile mappa scuro identico a quello dell'app utente.
+const DARK_MAP_STYLE = [
+  { elementType: 'geometry',            stylers: [{ color: '#0d0d1a' }] },
+  { elementType: 'labels.text.fill',    stylers: [{ color: '#6b7280' }] },
+  { elementType: 'labels.text.stroke',  stylers: [{ color: '#0d0d1a' }] },
+  { featureType: 'road',                elementType: 'geometry',        stylers: [{ color: '#1e1e3a' }] },
+  { featureType: 'water',               elementType: 'geometry',        stylers: [{ color: '#0a0a18' }] },
+  { featureType: 'poi',                 elementType: 'geometry',        stylers: [{ color: '#13132a' }] },
+  { featureType: 'landscape',           elementType: 'geometry',        stylers: [{ color: '#0f0f24' }] },
+];
 
 // ─── Costanti dominio ─────────────────────────────────────────────────────────
 
@@ -58,6 +71,38 @@ export default function InserisciAreaRestrizioneScreen() {
   const [vehicleTypes, setVehicleTypes] = useState<VehicleType[]>([]);
   const [descrizione,  setDescrizione]  = useState('');
 
+  // Ricerca zona (stesso meccanismo/sorgente dati della destinazione utente).
+  const [coords,      setCoords]      = useState<{ lat: number; lng: number } | null>(null);
+  const [suggestions, setSuggestions] = useState<ApiGeocodeResult[]>([]);
+  const [searching,   setSearching]   = useState(false);
+
+  // Autocompletamento in tempo reale via geocoding (debounce), come lato utente.
+  // Non cerca se è già stato selezionato un risultato (coords valorizzate).
+  useEffect(() => {
+    if (coords || indirizzo.trim().length < 2) { setSuggestions([]); return; }
+    let active = true;
+    setSearching(true);
+    const t = setTimeout(async () => {
+      try {
+        const res = await geoApi.geocode(indirizzo.trim());
+        if (active) setSuggestions(res);
+      } catch {
+        if (active) setSuggestions([]);
+      } finally {
+        if (active) setSearching(false);
+      }
+    }, 450);
+    return () => { active = false; clearTimeout(t); };
+  }, [indirizzo, coords]);
+
+  const selezionaZona = (r: ApiGeocodeResult) => {
+    const short = r.label.split(',').slice(0, 2).join(',');
+    setIndirizzo(short);
+    setCoords({ lat: r.lat, lng: r.lng });
+    setSuggestions([]);
+    setError(null);
+  };
+
   // Date
   const today       = new Date();
   const defaultFrom = new Date(today);
@@ -96,7 +141,7 @@ export default function InserisciAreaRestrizioneScreen() {
 
   // Validazione frontend
   const validate = (): string | null => {
-    if (indirizzo.trim().length < 3)   return 'Inserisci un indirizzo di almeno 3 caratteri';
+    if (!coords)                       return 'Cerca la zona e seleziona un risultato dai suggerimenti';
     if (raggioError)                   return 'Il raggio deve essere un numero intero positivo (≥ 1 m)';
     if (vehicleTypes.length === 0)     return 'Seleziona almeno una tipologia di mezzo';
     if (dateError)                     return 'La data di fine deve essere uguale o successiva alla data di inizio';
@@ -117,6 +162,8 @@ export default function InserisciAreaRestrizioneScreen() {
         note:      descrizione.trim(),
         valida_dal: toISODate(validaDal),
         valida_al:  toISODate(validaAl),
+        lat: coords!.lat,
+        lng: coords!.lng,
       });
       setSuccess(true);
     } catch (e: any) {
@@ -129,11 +176,12 @@ export default function InserisciAreaRestrizioneScreen() {
   const handleNuova = () => {
     setIndirizzo(''); setRaggio('100'); setTipo('NO_GO');
     setVehicleTypes([]); setDescrizione('');
+    setCoords(null); setSuggestions([]);
     setValidaDal(defaultFrom); setValidaAl(defaultTo);
     setSuccess(false); setError(null);
   };
 
-  const canSubmit = indirizzo.trim().length >= 3 && !raggioError && vehicleTypes.length > 0 && !dateError;
+  const canSubmit = !!coords && !raggioError && vehicleTypes.length > 0 && !dateError;
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -164,21 +212,84 @@ export default function InserisciAreaRestrizioneScreen() {
 
           {!success ? (
             <>
-              {/* Zona / Indirizzo */}
-              <Text style={styles.sectionLabel}>ZONA / INDIRIZZO</Text>
-              <View style={styles.inputWrapper}>
-                <Ionicons name="location-outline" size={18} color={Colors.muted} style={styles.inputIcon} />
+              {/* Zona / Indirizzo — ricerca con autocompletamento (come lato utente) */}
+              <Text style={styles.sectionLabel}>CERCA LA ZONA</Text>
+              <View style={[styles.inputWrapper, coords && { borderColor: Colors.primary }]}>
+                <Ionicons name="search-outline" size={18} color={coords ? Colors.accent : Colors.muted} style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
-                  placeholder="es. Via Roma 12, Piazza della Repubblica…"
+                  placeholder="Cerca un luogo: via, piazza, quartiere…"
                   placeholderTextColor={Colors.muted}
                   value={indirizzo}
-                  onChangeText={t => { setIndirizzo(t); setError(null); }}
+                  onChangeText={t => { setIndirizzo(t); setCoords(null); setError(null); }}
                   autoCapitalize="words"
-                  returnKeyType="next"
+                  autoCorrect={false}
+                  returnKeyType="search"
                 />
+                {searching && <ActivityIndicator size="small" color={Colors.accent} />}
+                {coords && !searching && (
+                  <TouchableOpacity onPress={() => { setIndirizzo(''); setCoords(null); }} hitSlop={8}>
+                    <Ionicons name="close-circle" size={18} color={Colors.muted} />
+                  </TouchableOpacity>
+                )}
               </View>
-              <Text style={styles.hint}>Le coordinate GPS vengono determinate automaticamente tramite geocoding.</Text>
+
+              {/* Suggerimenti in tempo reale */}
+              {suggestions.length > 0 && (
+                <View style={styles.suggestions}>
+                  {suggestions.map((s, i) => {
+                    const short = s.label.split(',').slice(0, 2).join(',');
+                    return (
+                      <TouchableOpacity
+                        key={`${s.lat}-${s.lng}-${i}`}
+                        style={[styles.suggestRow, i < suggestions.length - 1 && styles.suggestRowBorder]}
+                        onPress={() => selezionaZona(s)}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons name="location-outline" size={16} color={Colors.accent} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.suggestLabel} numberOfLines={1}>{short}</Text>
+                          <Text style={styles.suggestSub} numberOfLines={1}>{s.label.split(',').slice(2, 4).join(',').trim() || 'Indirizzo'}</Text>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
+
+              {/* Anteprima mappa: posiziona la restrizione (R + circonferenza rossa) */}
+              {coords && (
+                <View style={styles.mapPreview}>
+                  <MapView
+                    provider={PROVIDER_GOOGLE}
+                    style={StyleSheet.absoluteFillObject}
+                    region={{
+                      latitude: coords.lat,
+                      longitude: coords.lng,
+                      latitudeDelta: Math.max(0.006, (raggioParsed || 100) / 50000),
+                      longitudeDelta: Math.max(0.006, (raggioParsed || 100) / 50000),
+                    }}
+                    customMapStyle={DARK_MAP_STYLE}
+                    pointerEvents="none"
+                  >
+                    <Circle
+                      center={{ latitude: coords.lat, longitude: coords.lng }}
+                      radius={raggioError ? 100 : raggioParsed}
+                      strokeColor="#EF4444"
+                      strokeWidth={2}
+                      fillColor="rgba(239,68,68,0.18)"
+                    />
+                    <Marker coordinate={{ latitude: coords.lat, longitude: coords.lng }} anchor={{ x: 0.5, y: 0.5 }}>
+                      <View style={styles.rMarker}><Text style={styles.rMarkerText}>R</Text></View>
+                    </Marker>
+                  </MapView>
+                </View>
+              )}
+              <Text style={styles.hint}>
+                {coords
+                  ? 'Zona selezionata. Regola il raggio per definire i confini dell\'area.'
+                  : 'Digita per cercare e seleziona un risultato: la mappa si centra sulla zona.'}
+              </Text>
 
               {/* Raggio */}
               <Text style={[styles.sectionLabel, { marginTop: 24 }]}>RAGGIO (metri)</Text>
@@ -406,6 +517,16 @@ const styles = StyleSheet.create({
   inputSuffix:         { color: Colors.muted, fontSize: 13, marginLeft: 4 },
   input:               { flex: 1, color: Colors.text, fontSize: 14, paddingVertical: 10 },
   inputMulti:          { minHeight: 72, paddingVertical: 0 },
+
+  suggestions:         { backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border, borderRadius: 14, marginTop: 8, overflow: 'hidden' },
+  suggestRow:          { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 12 },
+  suggestRowBorder:    { borderBottomWidth: 1, borderBottomColor: Colors.border },
+  suggestLabel:        { color: Colors.text, fontSize: 14, fontWeight: '600' },
+  suggestSub:          { color: Colors.muted, fontSize: 11, marginTop: 2 },
+
+  mapPreview:          { height: 200, borderRadius: 16, overflow: 'hidden', borderWidth: 1, borderColor: Colors.border, marginTop: 12 },
+  rMarker:             { width: 26, height: 26, borderRadius: 6, backgroundColor: 'rgba(13,13,26,0.95)', borderWidth: 2, borderColor: '#EF4444', alignItems: 'center', justifyContent: 'center' },
+  rMarkerText:         { color: '#EF4444', fontWeight: '900', fontSize: 14 },
 
   chipGrid:            { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   chip:                { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 14, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.card, flex: 1, minWidth: '44%' },

@@ -1,612 +1,371 @@
-# Smart Mobility — SERLAB Project · Codebase Reference
+# 🛴 Smart Mobility — Gruppo C--
 
-> **Purpose of this document:** complete inventory of what currently exists in the code (files, class names, function names, endpoint paths, screen routes, component props). Use this as ground truth when renaming or realigning the implementation to match the official documentation.
+> Progetto d'esame per il corso di **Ingegneria del Software** — A.A. 2025/2026  
+> Università degli Studi di Bari Aldo Moro — CdL ITPS
+
+**Team:**  
+Andriani Chiara · Andriani Claudio · Azzollini Vito · Campi Mattia
 
 ---
 
-## Tech Stack
+## Indice
 
-| Layer | Technology |
+1. [Descrizione del Progetto](#1-descrizione-del-progetto)
+2. [Architettura del Sistema](#2-architettura-del-sistema)
+3. [Stack Tecnologico](#3-stack-tecnologico)
+4. [Confronto Documentazione ↔ Implementazione](#4-confronto-documentazione--implementazione)
+   - [Product Backlog — Item Funzionali](#41-product-backlog--item-funzionali)
+   - [Use Cases (CU-01 → CU-35)](#42-use-cases-cu-01--cu-35)
+5. [Struttura del Progetto](#5-struttura-del-progetto)
+6. [Installazione e Avvio](#6-installazione-e-avvio)
+7. [Reset del Database](#7-reset-del-database)
+8. [Credenziali di Default](#8-credenziali-di-default)
+9. [Repository GitHub](#9-repository-github)
+
+---
+
+## 1. Descrizione del Progetto
+
+Smart Mobility è una piattaforma di **sharing della mobilità urbana** che integra servizi di bike sharing, car sharing ed e-scooter sharing. Il sistema permette agli utenti di trovare, prenotare, sbloccare e pagare i mezzi tramite app mobile, mentre operatori e amministrazione pubblica monitorano e gestiscono la flotta e i dati di mobilità tramite dashboard web dedicata.
+
+Il contesto di riferimento è il **Comune di Zootropolis** (simulato su Bari per il prototipo), con 22 aree di parcheggio e una flotta di 60 veicoli (bici, monopattini, auto).
+
+---
+
+## 2. Architettura del Sistema
+
+Il sistema segue il pattern **MVC (Model-View-Controller)** su tre livelli distinti:
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                          VIEW                                │
+│  ┌──────────────────┐  ┌───────────────────────────────────┐ │
+│  │  VistaUtente     │  │  VistaOperatore / VistaAmm.       │ │
+│  │  (React Native / │  │  (React + Vite, porta 5173)       │ │
+│  │   Expo SDK 54)   │  │  FormAutenticazione               │ │
+│  │                  │  │  ComponenteMappa                  │ │
+│  └────────┬─────────┘  └────────────┬──────────────────────┘ │
+└───────────┼────────────────────────┼───────────────────────--┘
+            │  REST API / WebSocket  │
+┌───────────┼────────────────────────┼────────────────────────┐
+│           ▼       CONTROLLER       ▼                        │
+│  FastAPI (Python 3.12) — porta 8000                         │
+│  GestioneMezzi · GestionePrenotazioni · GestioneCorsa       │
+│  GestionePagamenti · GestioneUtenti · GestioneSegnalazioni  │
+│  GestioneOperatore · GestioneAmministrazione                │
+│  GestioneRestrizioni · GestionePercorsi · GestioneRealtà    │
+└─────────────────────────┬───────────────────────────────────┘
+                          │  SQLAlchemy ORM
+┌─────────────────────────▼────────────────────────────────---┐
+│                        MODEL                                │
+│  PostgreSQL 15 — tabelle: Utente, Mezzo, Prenotazione,      │
+│  Pagamento, Percorso, Corsa, Segnalazione, Promozione,      │
+│  AreaRestrizione, Operatore, AmministrazionePubblica,       │
+│  Mezzo_AreaRestrizione                                      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Interfacce esterne:** Maps API (Nominatim + OSRM), Payments Provider (simulato).
+
+---
+
+## 3. Stack Tecnologico
+
+| Livello | Tecnologia |
 |---|---|
-| Mobile | React Native 0.81.5 · Expo SDK 54 · TypeScript · Expo Router (file-based routing) |
-| Backend | Python 3.12 · FastAPI · SQLAlchemy 2 (ORM) · SQLite (dev) · Pydantic v2 |
-| Auth | JWT (python-jose) · SecureStore (mobile) · Social: Google (expo-auth-session) · Apple (expo-apple-authentication) |
-| Maps | react-native-maps · OpenStreetMap Nominatim (geocoding) · OSRM demo API (routing) |
+| **Mobile (VIEW Utente)** | React Native 0.81 · Expo SDK 54 · TypeScript · Expo Router v6 (file-based routing) |
+| **Dashboard (VIEW Op./Amm.)** | React 19 · Vite 6 · TypeScript · Porta 5173 |
+| **Backend (CONTROLLER)** | Python 3.12 · FastAPI · SQLAlchemy 2 · Pydantic v2 · Uvicorn |
+| **Database (MODEL)** | PostgreSQL 15 |
+| **Real-time** | WebSocket (FastAPI WebSocket router) |
+| **Autenticazione** | JWT (python-jose) · SecureStore (mobile) |
+| **Mappe** | react-native-maps · Nominatim (geocoding) · OSRM (routing) |
+| **Container** | Docker + Docker Compose |
+| **Versioning** | SVN (Redmine) + GitHub |
 
 ---
 
-## Project Structure
+## 4. Confronto Documentazione ↔ Implementazione
+
+### 4.1 Product Backlog — Item Funzionali
+
+La documentazione (v6.0) specifica **35 Item Funzionali** distribuiti su tre ruoli. La tabella seguente mostra il grado di implementazione nel codice.
+
+#### Utenti (UT.01 – UT.18)
+
+| ID | Titolo | Stato | Componente implementato |
+|---|---|---|---|
+| UT.01 | Visualizzazione mappa mezzi disponibili | ✅ Implementato | `(app)/index.tsx` · `vehicles.py` |
+| UT.02 | Prenotazione di un mezzo | ✅ Implementato | `(app)/reserve.tsx` · `(app)/active-reservation.tsx` · `reservations.py` |
+| UT.03 | Ricerca destinazione | ✅ Implementato | `(app)/search.tsx` · `geo.py` (Nominatim) |
+| UT.04 | Stima del costo del viaggio | ✅ Implementato | `(app)/search.tsx` (calcolo client-side su distanza) |
+| UT.05 | Termine corsa | ✅ Implementato | `(app)/end-ride.tsx` · `rides.py` |
+| UT.06 | Percorso ottimale in tempo reale | ✅ Implementato | `(app)/search.tsx` · `(app)/active-ride.tsx` (OSRM routing) |
+| UT.07 | Suggerimento mezzo più adatto | ✅ Implementato | `(app)/search.tsx` (filtro autonomia + distanza) |
+| UT.08 | Visualizzazione e applicazione promozioni | ✅ Implementato | `(app)/promotions.tsx` · `promotions.py` |
+| UT.09 | Chat con il servizio clienti | ✅ Implementato | `(app)/chat-support.tsx` · `(app)/support.tsx` · `messages.py` |
+| UT.10 | Login nel profilo | ✅ Implementato | `(auth)/login.tsx` · `auth.py` (JWT) |
+| UT.11 | Visualizzazione stato di carica | ✅ Implementato | `(app)/index.tsx` (pannello dettaglio mezzo) · `vehicles.py` |
+| UT.12 | Sblocco mezzo tramite QR code o app | ✅ Implementato | `(app)/scan.tsx` · `(app)/activate.tsx` · `vehicles.py` |
+| UT.13 | Gestione metodo di pagamento | ✅ Implementato | `(app)/wallet.tsx` · `wallet.py` |
+| UT.14 | Pausa corsa | ✅ Implementato | `(app)/active-ride.tsx` · `rides.py` (pausa con timer accumulato) |
+| UT.15 | Creazione profilo utente | ✅ Implementato | `(auth)/register.tsx` · `auth.py` |
+| UT.16 | Visualizzazione aree non accessibili | ✅ Implementato | `(app)/index.tsx` (overlay mappa) · `restrizioni.py` |
+| UT.17 | Segnalazione problematiche percorso | ✅ Implementato | `(app)/report.tsx` · `(app)/reports-history.tsx` · `segnalazioni.py` |
+| UT.18 | Pagamento corsa | ✅ Implementato | `(app)/ride-payment.tsx` · `(app)/payment-receipt.tsx` · `payment.py` |
+
+#### Amministrazione Pubblica (AP.01 – AP.07)
+
+| ID | Titolo | Stato | Componente implementato |
+|---|---|---|---|
+| AP.01 | Monitoraggio frequenza utilizzo mezzi | ✅ Implementato | `(admin)/monitoraggio.tsx` · `amministrazione.py` |
+| AP.02 | Segnalazione manutenzioni urbane | ✅ Implementato | `(admin)/segnala-zona.tsx` · `(admin)/segna-zona.tsx` |
+| AP.03 | Tratte più utilizzate | ✅ Implementato | `(admin)/tratte-piu-utilizzate.tsx` · `amministrazione.py` |
+| AP.04 | Configurazione aree con restrizioni | ✅ Implementato | `(admin)/inserisci-area-restrizione.tsx` · `restrizioni.py` |
+| AP.05 | Report aggregati sulla mobilità | ✅ Implementato | `(admin)/report-mobilita.tsx` · `amministrazione.py` |
+| AP.06 | Registrazione Amministrazione | ✅ Implementato | `(auth)/register.tsx` (role=AMMINISTRAZIONE) · `auth.py` |
+| AP.07 | Login Amministrazione | ✅ Implementato | `(auth)/login.tsx` · `auth.py` (ruolo rilevato da JWT) |
+
+#### Operatore del Servizio (OP.01 – OP.10)
+
+| ID | Titolo | Stato | Componente implementato |
+|---|---|---|---|
+| OP.01 | Registrazione Operatore | ✅ Implementato | `(auth)/register.tsx` (role=OPERATORE) · `auth.py` |
+| OP.02 | Notifiche aree a diversa disponibilità | ✅ Implementato | `(operatore)/disponibilita-aree.tsx` · `operatore.py` (soglie VUOTA/CRITICA/OK/PIENA) |
+| OP.03 | Conoscenza malfunzionamenti mezzi | ✅ Implementato | `(operatore)/malfunzionamenti-mezzi.tsx` · `segnalazioni.py` |
+| OP.04 | Posizione mezzo a fine corsa | ✅ Implementato | `(operatore)/mezzi-fine-corsa.tsx` · `operatore.py` |
+| OP.05 | Tracciamento posizione in tempo reale | ✅ Implementato | `(operatore)/tracciamento-mezzi.tsx` · `realtime.py` (WebSocket) |
+| OP.06 | Chiusura segnalazione | ✅ Implementato | `(operatore)/chiudi-segnalazioni.tsx` · `(operatore)/segnalazione-dettaglio.tsx` · `segnalazioni.py` |
+| OP.07 | Assegnazione automatica bonus | ✅ Implementato | `(operatore)/assegna-bonus.tsx` · `operatore.py` |
+| OP.08 | Sospensione o blocco account utente | ✅ Implementato | `(operatore)/blocco-utenti.tsx` · `operatore.py` (auto-logout su account bloccato) |
+| OP.09 | Blocco remoto mezzo | ✅ Implementato | `(operatore)/blocco-remoto.tsx` · `operatore.py` (`locked=True/False`) |
+| OP.10 | Login Operatore | ✅ Implementato | `(auth)/login.tsx` · `auth.py` (ruolo OPERATORE da JWT) |
+
+> **Copertura totale: 35/35 Item Funzionali implementati (100%)**
+
+---
+
+### 4.2 Use Cases (CU-01 → CU-35)
+
+La documentazione specifica 35 casi d'uso con sequenze principali, sequenze alternative e pre/post-condizioni. La tabella seguente mappa ogni CU ai moduli implementati.
+
+| CU | Nome | Attori | Implementazione |
+|---|---|---|---|
+| **CU-01** | Creazione profilo utente | Utente | `register.tsx` → `POST /auth/register` |
+| **CU-02** | Visualizzazione mappa mezzi disponibili | Utente, Maps API | `index.tsx` → `GET /vehicles` (spawn-near-user logic) |
+| **CU-03** | Prenotazione di un mezzo | Utente | `reserve.tsx` → `POST /reservations` · timer scadenza |
+| **CU-04** | Sblocco mezzo tramite QR code o app | Utente | `scan.tsx` + `activate.tsx` → `POST /vehicles/{id}/unlock` |
+| **CU-05** | Termine corsa e visualizzazione costo | Utente, Maps API | `end-ride.tsx` → `POST /rides/{id}/end` · verifica area parcheggio |
+| **CU-06** | Cerca destinazione | Utente, Maps API | `search.tsx` → `GET /geo/search` (Nominatim autocomplete) |
+| **CU-07** | Calcola stima costo | Utente, Maps API | `search.tsx` (calcolo client-side distanza × tariffa/km) |
+| **CU-08** | Percorso più veloce in real time | Utente, Maps API | `search.tsx` + `active-ride.tsx` → OSRM routing API |
+| **CU-09** | Visualizza mezzo idoneo | Utente | `search.tsx` (filtro autonomia vs distanza stimata) |
+| **CU-10** | Visualizzazione e applicazione promozioni | Utente | `promotions.tsx` → `GET /promotions` · applicazione a corsa |
+| **CU-11** | Chat con il servizio clienti | Utente | `chat-support.tsx` → `GET/POST /messages` |
+| **CU-12** | Login utente | Utente | `login.tsx` → `POST /auth/login` (JWT) |
+| **CU-13** | Visualizzazione stato di carica | Utente | `index.tsx` (pannello dettaglio mezzo, campo `battery_level`) |
+| **CU-14** | Pausa corsa | Utente | `active-ride.tsx` → `POST /rides/{id}/pause` · `POST /rides/{id}/resume` |
+| **CU-15** | Gestione metodo di pagamento | Utente | `wallet.tsx` → `GET/POST/DELETE /wallet/cards` |
+| **CU-16** | Visualizzazione aree non accessibili | Utente | `index.tsx` (overlay poligoni) → `GET /restrizioni` |
+| **CU-17** | Segnalazione problematiche percorso | Utente | `report.tsx` → `POST /segnalazioni` · `reports-history.tsx` |
+| **CU-18** | Pagamento corsa | Utente | `ride-payment.tsx` → `POST /payment/ride` · `payment-receipt.tsx` |
+| **CU-19** | Monitoraggio frequenza utilizzo mezzi | Amministrazione | `(admin)/monitoraggio.tsx` → `GET /amministrazione/stats` |
+| **CU-20** | Segnalazione manutenzioni urbane | Amministrazione | `(admin)/segnala-zona.tsx` · `(admin)/segna-zona.tsx` |
+| **CU-21** | Tratte più utilizzate | Amministrazione | `(admin)/tratte-piu-utilizzate.tsx` → `GET /amministrazione/tratte` |
+| **CU-22** | Configurazione aree con restrizioni | Amministrazione | `(admin)/inserisci-area-restrizione.tsx` → `POST /restrizioni` |
+| **CU-23** | Report aggregati sulla mobilità | Amministrazione | `(admin)/report-mobilita.tsx` → `GET /amministrazione/report` |
+| **CU-24** | Registrazione Amministrazione Pubblica | Amministrazione | `register.tsx` (role=AMMINISTRAZIONE) → `POST /auth/register` |
+| **CU-25** | Login Amministrazione Pubblica | Amministrazione | `login.tsx` → `POST /auth/login` (role check JWT) |
+| **CU-26** | Registrazione Operatore | Operatore | `register.tsx` (role=OPERATORE) → `POST /auth/register` |
+| **CU-27** | Login Operatore | Operatore | `login.tsx` → `POST /auth/login` (role check JWT) |
+| **CU-28** | Blocco remoto mezzo | Operatore | `(operatore)/blocco-remoto.tsx` → `POST /operatore/mezzi/{id}/blocco` + `VistaOperatore.tsx` |
+| **CU-29** | Notifiche aree a diversa disponibilità | Operatore | `(operatore)/disponibilita-aree.tsx` → `GET /operatore/aree-densita` (VUOTA/CRITICA/OK/PIENA) |
+| **CU-30** | Conoscenza malfunzionamenti mezzi | Operatore | `(operatore)/malfunzionamenti-mezzi.tsx` → `GET /segnalazioni` (filtro stato=aperta) |
+| **CU-31** | Posizione mezzo a fine corsa | Operatore | `(operatore)/mezzi-fine-corsa.tsx` → `GET /operatore/mezzi-rilascio` |
+| **CU-32** | Tracciamento posizione in tempo reale | Operatore | `(operatore)/tracciamento-mezzi.tsx` → WebSocket `/realtime/ws` |
+| **CU-33** | Chiusura segnalazione | Operatore | `(operatore)/chiudi-segnalazioni.tsx` → `PATCH /segnalazioni/{id}` (stato=chiusa) |
+| **CU-34** | Assegnazione automatica bonus | Operatore | `(operatore)/assegna-bonus.tsx` → `POST /operatore/bonus` |
+| **CU-35** | Sospensione o blocco account utente | Operatore | `(operatore)/blocco-utenti.tsx` → `PATCH /operatore/utenti/{id}/stato` · auto-logout 403 |
+
+> **Copertura Use Cases: 35/35 (100%)**
+
+#### Note sull'implementazione
+
+- **Spawn-near-user logic (CU-02):** se l'utente ha meno di 12 veicoli entro ~1,2 km, il sistema sposta automaticamente veicoli parcheggiati nelle 8 aree di parcheggio più vicine all'utente.
+- **Auto-logout su blocco account (CU-35):** il backend risponde HTTP 403 quando un utente bloccato/sospeso fa qualsiasi richiesta autenticata. Il client mobile intercetta globalmente il 403 ed esegue il logout immediato.
+- **Disponibilità Aree (CU-29):** soglie — `0 veicoli = VUOTA 🔴`, `1-2 = CRITICA 🟡`, `3-5 = OK 🟢`, `≥6 = PIENA 🔵`.
+- **Blocco remoto mezzo (CU-28):** i veicoli bloccati (`locked=True`) sono esclusi dalla mappa utenti ma visibili all'operatore nella sezione "Mezzi a fine corsa".
+- **WebSocket real-time (CU-32):** aggiornamento continuo della posizione dei mezzi in corsa tramite `/realtime/ws`.
+
+---
+
+## 5. Struttura del Progetto
 
 ```
 Smart_Mobility_SERLAB/
 ├── backend/
+│   ├── app/
+│   │   ├── main.py              # FastAPI app, lifespan, CORS, router registration
+│   │   ├── models.py            # SQLAlchemy ORM models (MODEL layer)
+│   │   ├── schemas.py           # Pydantic request/response schemas
+│   │   ├── database.py          # Engine, SessionLocal, wait_for_db
+│   │   ├── deps.py              # get_current_user, require_role
+│   │   ├── security.py          # JWT encode/decode, password hashing
+│   │   ├── seed.py              # Seed: 60 veicoli, 22 aree di Bari, utenti demo
+│   │   └── routers/
+│   │       ├── auth.py          # Registrazione, login, JWT
+│   │       ├── users.py         # Profilo utente, impostazioni
+│   │       ├── vehicles.py      # Flotta, sblocco, spawn-near-user
+│   │       ├── rides.py         # Corsa, pausa, fine corsa
+│   │       ├── reservations.py  # Prenotazioni con timer scadenza
+│   │       ├── parking.py       # Aree di parcheggio
+│   │       ├── payment.py       # Pagamenti corsa
+│   │       ├── wallet.py        # Metodi di pagamento utente
+│   │       ├── promotions.py    # Promozioni e coupon
+│   │       ├── messages.py      # Chat supporto clienti
+│   │       ├── segnalazioni.py  # Segnalazioni utenti/admin
+│   │       ├── restrizioni.py   # Aree di restrizione
+│   │       ├── geo.py           # Geocoding (Nominatim)
+│   │       ├── reports.py       # Report corsa
+│   │       ├── operatore.py     # Funzionalità operatore (blocchi, aree, bonus)
+│   │       ├── amministrazione.py # Funzionalità amministrazione
+│   │       └── realtime.py      # WebSocket tracciamento real-time
+│   └── Dockerfile
+├── mobile/
 │   └── app/
-│       ├── main.py              # FastAPI app, lifespan, CORS, router registration
-│       ├── models.py            # SQLAlchemy ORM models
-│       ├── schemas.py           # Pydantic request/response schemas
-│       ├── database.py          # SQLAlchemy engine, SessionLocal, get_db
-│       ├── deps.py              # get_current_user, require_role dependencies
-│       ├── security.py          # hash_password, verify_password, create_token, decode_token
-│       ├── seed.py              # Initial DB data (40 vehicles, 1 demo user, promotions)
-│       ├── config.py            # Settings (SECRET_KEY, GOOGLE_CLIENT_ID, etc.)
-│       └── routers/
-│           ├── auth.py          # /auth/*
-│           ├── users.py         # /users/*
-│           ├── vehicles.py      # /vehicles/*
-│           ├── rides.py         # /rides/*
-│           ├── wallet.py        # /wallet/*
-│           ├── payment.py       # /payment-methods/*
-│           ├── promotions.py    # /promotions/*
-│           ├── messages.py      # /messages/*
-│           ├── reports.py       # /reports/*
-│           ├── geo.py           # /geocode, /route, /route/options
-│           ├── parking.py       # /parking/*
-│           ├── segnalazioni.py  # /segnalazioni/*
-│           ├── restrizioni.py   # /aree-restrizione/*
-│           ├── operatore.py     # /operatore/* (role-gated)
-│           ├── amministrazione.py # /amministrazione/* (role-gated)
-│           └── realtime.py      # WebSocket /ws/mezzi/{id}, /ws/notifiche
-└── mobile/
-    ├── app/
-    │   ├── _layout.tsx          # Root layout (GestureHandlerRootView, AuthProvider)
-    │   ├── index.tsx            # Redirect root -> auth or app
-    │   ├── (auth)/
-    │   │   ├── _layout.tsx
-    │   │   ├── login.tsx
-    │   │   ├── register.tsx
-    │   │   └── forgot-password.tsx
-    │   └── (app)/
-    │       ├── _layout.tsx
-    │       ├── index.tsx        # Main map screen (home)
-    │       ├── search.tsx       # Vehicle list / search + filter
-    │       ├── scan.tsx         # QR code scanner
-    │       ├── active-ride.tsx  # Ongoing ride screen
-    │       ├── end-ride.tsx     # Post-ride summary
-    │       ├── reserve.tsx      # Vehicle reservation confirm
-    │       ├── ride-history.tsx # Past rides list
-    │       ├── wallet.tsx       # Wallet + transactions
-    │       ├── payment.tsx      # Payment methods
-    │       ├── promotions.tsx   # Promotions list
-    │       ├── messages.tsx     # In-app messages / notifications
-    │       ├── report.tsx       # Submit a report
-    │       ├── profile.tsx      # User profile
-    │       ├── settings.tsx     # Notification + privacy preferences
-    │       └── support.tsx      # Support contacts
-    ├── components/
-    │   ├── map/
-    │   │   ├── VehicleDetailSheet.tsx   # Bottom panel shown when a map marker is tapped
-    │   │   └── ManualLocationModal.tsx  # Modal for manual GPS fallback (SA-02a)
-    │   └── ui/
-    │       ├── GlassCard.tsx
-    │       ├── GradientButton.tsx
-    │       └── VehicleCard.tsx          # Card used in search.tsx vehicle list
-    ├── lib/
-    │   ├── api/
-    │   │   ├── client.ts        # apiFetch(), ApiError, base URL resolution
-    │   │   ├── endpoints.ts     # All API client objects (authApi, vehiclesApi, etc.)
-    │   │   └── types.ts         # TypeScript interfaces for all API responses
-    │   ├── auth/
-    │   │   └── AuthContext.tsx  # AuthProvider, useAuth hook, token persistence
-    │   ├── geo.ts               # Coords interface, haversineMeters, formatDistance, walkMinutes
-    │   ├── vehicles.ts          # MapVehicle interface, toMapVehicle, vehicleIcon, vehicleTypeLabel
-    │   ├── useDeviceLocation.ts # useDeviceLocation hook (GPS + manual fallback)
-    │   └── format.ts            # relativeTime, shortDateTime
-    └── constants/
-        └── theme.ts             # Colors, Gradients (design tokens)
+│       ├── (auth)/              # Login, Register, Forgot Password
+│       ├── (app)/               # Schermate utente principale
+│       ├── (operatore)/         # Schermate operatore
+│       └── (admin)/             # Schermate amministrazione
+├── dashboard/
+│   └── src/
+│       ├── pages/
+│       │   ├── VistaOperatore.tsx
+│       │   ├── VistaAmministrazione.tsx
+│       │   └── FormAutenticazione.tsx
+│       └── components/
+│           ├── ComponenteMappa.tsx
+│           └── Layout.tsx
+└── docker-compose.yml
 ```
 
 ---
 
-## Backend — Database Models (`models.py`)
+## 6. Installazione e Avvio
 
-### `User`
-| Field | Type | Notes |
+### Prerequisiti
+
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (con Docker Compose v2)
+- [Node.js 20+](https://nodejs.org/) e npm
+- [Expo Go](https://expo.dev/go) sul dispositivo mobile (iOS o Android)
+
+### Passo 1 — Clona il repository
+
+```bash
+git clone https://github.com/ClaudeThePurrGrammer/Smart_Mobility_SERLAB.git
+cd Smart_Mobility_SERLAB
+```
+
+### Passo 2 — Configura le variabili d'ambiente
+
+Crea un file `.env` nella root del progetto:
+
+```env
+# Indirizzo IP della macchina host (necessario per Expo Go su LAN)
+HOST_IP=<il-tuo-ip-locale>   # es. 192.168.1.10
+
+# Segreto JWT (cambia in produzione)
+JWT_SECRET=changeme
+```
+
+Per trovare il tuo IP locale:
+- **Windows:** `ipconfig` → IPv4 Address
+- **macOS/Linux:** `ifconfig` oppure `ip a`
+
+### Passo 3 — Avvia il Backend (API + Database)
+
+```bash
+docker compose up --build backend db -d
+```
+
+Il backend sarà disponibile su `http://localhost:8000`. La documentazione API interattiva è su `http://localhost:8000/docs`.
+
+> Al primo avvio il database viene popolato automaticamente con 60 veicoli, 22 aree di parcheggio di Bari, e gli account demo.
+
+### Passo 4 — Avvia la Dashboard Web (Operatore / Amministrazione)
+
+```bash
+docker compose up --build dashboard -d
+```
+
+La dashboard è disponibile su `http://localhost:5173`.
+
+### Passo 5 — Avvia l'App Mobile
+
+L'app mobile viene avviata **fuori da Docker** per compatibilità con Expo Go:
+
+```bash
+cd mobile
+npm install
+npx expo start --lan --clear
+```
+
+Scansiona il QR code con **Expo Go** (Android) o con la fotocamera (iOS).
+
+> Assicurati che il dispositivo mobile e il PC siano sulla **stessa rete Wi-Fi**.
+
+### Riepilogo servizi
+
+| Servizio | URL | Note |
 |---|---|---|
-| `id` | int PK | |
-| `name` | str | |
-| `surname` | str | |
-| `email` | str unique | |
-| `phone` | str nullable | |
-| `password_hash` | str nullable | null for social-only accounts |
-| `provider` | str | `"email"` / `"google"` / `"apple"` / `"facebook"` |
-| `provider_id` | str nullable | |
-| `points` | int | gamification points |
-| `balance` | float | wallet balance in EUR |
-| `notifications_enabled` | bool | |
-| `preferences` | dict (JSON) | stores notification/privacy toggles |
-| `role` | str | `"UTENTE"` / `"OPERATORE"` / `"AMMINISTRAZIONE"` |
-| `account_status` | str | `"attivo"` / `"sospeso"` |
-| `created_at` | datetime | |
+| Backend API | `http://localhost:8000` | |
+| Swagger UI | `http://localhost:8000/docs` | Documentazione interattiva |
+| Dashboard | `http://localhost:5173` | Login con account operatore/amm. |
+| App Mobile | QR code nel terminale | Expo Go |
 
-### `Vehicle`
-| Field | Type | Notes |
+---
+
+## 7. Reset del Database
+
+Per ripartire da zero (cancella tutti i dati e ri-esegue il seed):
+
+```bash
+docker compose down -v
+docker compose up --build backend db -d
+```
+
+---
+
+## 8. Credenziali di Default
+
+Dopo il seed iniziale sono disponibili i seguenti account demo:
+
+| Ruolo | Email | Password |
 |---|---|---|
-| `id` | int PK | |
-| `name` | str | e.g. `"Smart S1-01"` |
-| `model` | str | e.g. `"Pro 2024"` |
-| `type` | str | `"scooter"` / `"bike"` / `"ebike"` / `"car"` |
-| `lat` | float | GPS latitude (mutated by drift simulation on every list call) |
-| `lng` | float | GPS longitude |
-| `battery_pct` | int | 0-100 |
-| `status` | str | `"available"` / `"in_use"` / `"maintenance"` |
-| `unlock_fee` | float | EUR |
-| `price_per_min` | float | EUR/min |
-| `locked` | bool | remote lock flag (operator use) |
+| Utente | `demo@smartmobility.it` | `password123` |
+| Operatore | `operatore@smartmobility.it` | `operatore123` |
+| Amministrazione | `admin@smartmobility.it` | `admin123` |
 
-### `ParkingArea`
-| Field | Type |
-|---|---|
-| `id` | int PK |
-| `name` | str |
-| `address` | str |
-| `lat` / `lng` | float |
-| `radius_m` | int |
-| `capacity` | int |
-| `occupied` | int |
-
-### `Ride`
-| Field | Type | Notes |
-|---|---|---|
-| `id` | int PK | |
-| `user_id` | FK -> users | |
-| `vehicle_id` | FK -> vehicles nullable | |
-| `vehicle_type` | str | |
-| `from_addr` | str | |
-| `to_addr` | str | |
-| `km` | float | |
-| `minutes` | int | |
-| `cost` | float | EUR |
-| `points` | int | earned points |
-| `status` | str | `"active"` / `"paused"` / `"completed"` |
-| `started_at` | datetime | |
-| `ended_at` | datetime nullable | |
-
-### `WalletTransaction`
-| Field | Type | Notes |
-|---|---|---|
-| `id` | int PK | |
-| `user_id` | FK | |
-| `type` | str | `"charge"` / `"refund"` / `"topup"` |
-| `label` | str | |
-| `amount` | float | negative for charges |
-| `created_at` | datetime | |
-
-### `PaymentMethod`
-| Field | Type | Notes |
-|---|---|---|
-| `id` | int PK | |
-| `user_id` | FK | |
-| `kind` | str | `"card"` / `"apple"` / `"paypal"` |
-| `label` | str | |
-| `last4` | str nullable | |
-| `is_default` | bool | |
-
-### `Promotion`
-Fields: `id`, `code`, `title`, `body`, `reward`, `icon`, `color`, `kind` (`"offer"` / `"active"`), `expiry`, `used`, `total`
-
-### `Message`
-Fields: `id`, `user_id`, `type` (`"promo"` / `"ride"` / `"alert"` / `"system"`), `title`, `body`, `read`, `created_at`
-
-### `Segnalazione`
-Fields: `id`, `user_id`, `vehicle_id`, `category`, `description`, `status` (`"aperta"` / `"chiusa"`), `created_at`, `chiusa_at`, `note_operatore`
-
-### `AreaRestrizione`
-Fields: `id`, `name`, `lat`, `lng`, `radius_m`, `type` (`"velocita"` / `"divieto"`), `max_speed_kmh`, `vehicle_types` (JSON), `active`
-
-### `OperatoreProfile` / `AmministrazioneProfile`
-Linked to `User` via `user_id`. Store role-specific metadata.
+> ⚠️ Queste credenziali sono solo per ambienti di sviluppo e test.
 
 ---
 
-## Backend — Pydantic Schemas (`schemas.py`)
+## 9. Repository GitHub
 
-### Auth
-- `RegisterIn`: `name, surname, email, password, phone?`
-- `LoginIn`: `email, password`
-- `TokenOut`: `access_token, token_type, user`
-- `UserOut`: full user representation
-- `UserUpdate`: `name?, surname?, phone?, notifications_enabled?`
-- `ForgotPasswordIn`: `email`
+Il codice sorgente completo è disponibile su:
 
-### Vehicle
-- `VehicleOut`: mirrors `Vehicle` model fields
+**🔗 https://github.com/ClaudeThePurrGrammer/Smart_Mobility_SERLAB**
 
-### Parking
-- `ParkingAreaOut`: mirrors `ParkingArea` model fields
-
-### Ride
-- `RideCreate`: `vehicle_id?, vehicle_type?, from_addr?, to_addr?`
-- `RideEnd`: `km, minutes`
-- `RideOut`: full ride representation
-
-### Wallet
-- `TopUpIn`: `amount`
-- `WalletOut`: `balance, transactions[]`
-- `TransactionOut`: mirrors `WalletTransaction`
-
-### Payment
-- `PaymentMethodIn`: `kind, label, last4?, is_default?`
-- `PaymentMethodOut`: mirrors `PaymentMethod`
-
-### Geo
-- `GeocodeResult`: `display_name, lat, lng, distance_m?`
-- `RoutePoint`: `lat, lng`
-- `RouteOption`: `mode, duration_min, distance_km, cost_eur, points[]`
-
-### Preferences
-- `PreferencesIn`: `notif_ride?, notif_promo?, notif_system?, location_bg?, biometric?`
-- `PreferencesOut`: same fields with defaults (`notif_ride=True, notif_promo=True, notif_system=False, location_bg=True, biometric=False`)
-
-### Reports / Segnalazioni
-- `ReportIn`: `category, description?`
-- `ReportOut`: full report
-- `SegnalazioneOut`: full segnalazione with operator fields
-
-### Area Restrizione
-- `AreaRestrizioneIn`, `AreaRestrizioneUpdate`, `AreaRestrizioneOut`
-
-### Admin
-- `AccountStatusIn`: `status`
-- `VehicleLockIn`: `locked`
-- `UserAdminOut`: extended user info for admin views
+Se questo progetto ti è stato utile o hai trovato interessante il lavoro svolto,  
+considera di **lasciare una ⭐ Star** sulla repository — è un piccolo gesto che significa molto per il team! 😊
 
 ---
 
-## Backend — API Endpoints
+<div align="center">
 
-### Auth — prefix `/auth`
-| Method | Path | Function | Auth |
-|---|---|---|---|
-| POST | `/auth/register` | `register` | public |
-| POST | `/auth/login` | `login` | public |
-| POST | `/auth/forgot-password` | `forgot_password` | public |
-| GET | `/auth/me` | `me` | JWT |
-| PATCH | `/auth/me` | `update_me` | JWT |
+*Progetto realizzato per il corso di Ingegneria del Software — A.A. 2025/2026*  
+*Università degli Studi di Bari Aldo Moro*
 
-### Vehicles — prefix `/vehicles`
-| Method | Path | Function | Auth |
-|---|---|---|---|
-| GET | `/vehicles` | `list_vehicles` | public |
-| GET | `/vehicles/{vehicle_id}` | `get_vehicle` | public |
+**Andriani Chiara · Andriani Claudio · Azzollini Vito · Campi Mattia**
 
-Query params for `list_vehicles`: `lat`, `lng`, `only_available`.
-Side effect: GPS drift simulation applied on every call; vehicles repositioned near user if none within 0.05 degrees (~5km).
-
-### Parking — prefix `/parking`
-| Method | Path | Function | Auth |
-|---|---|---|---|
-| GET | `/parking` | `list_parking` | public |
-
-Query params: `lat?`, `lng?`, `radius_km?`
-
-### Rides — prefix `/rides`
-| Method | Path | Function | Auth |
-|---|---|---|---|
-| GET | `/rides` | `history` | JWT |
-| GET | `/rides/active` | `active_ride` | JWT |
-| POST | `/rides` | `start_ride` | JWT |
-| PATCH | `/rides/{ride_id}/pause` | `toggle_pause` | JWT |
-| POST | `/rides/{ride_id}/end` | `end_ride` | JWT |
-
-### Wallet — prefix `/wallet`
-| Method | Path | Function | Auth |
-|---|---|---|---|
-| GET | `/wallet` | `get_wallet` | JWT |
-| POST | `/wallet/topup` | `topup` | JWT |
-
-### Payment Methods — prefix `/payment-methods`
-| Method | Path | Function | Auth |
-|---|---|---|---|
-| GET | `/payment-methods` | `list_methods` | JWT |
-| POST | `/payment-methods` | `add_method` | JWT |
-| DELETE | `/payment-methods/{method_id}` | `delete_method` | JWT |
-
-### Promotions — prefix `/promotions`
-| Method | Path | Function | Auth |
-|---|---|---|---|
-| GET | `/promotions` | `list_promotions` | public |
-
-### Messages — prefix `/messages`
-| Method | Path | Function | Auth |
-|---|---|---|---|
-| GET | `/messages` | `list_messages` | JWT |
-| POST | `/messages/read-all` | `mark_all_read` | JWT |
-| POST | `/messages/{message_id}/read` | `mark_read` | JWT |
-
-### Reports — prefix `/reports`
-| Method | Path | Function | Auth |
-|---|---|---|---|
-| GET | `/reports` | `list_reports` | JWT |
-| POST | `/reports` | `create_report` | JWT |
-
-### Geo — no prefix
-| Method | Path | Function | Auth |
-|---|---|---|---|
-| GET | `/geocode` | `geocode` | public |
-| GET | `/route` | `route` | public |
-| GET | `/route/options` | `route_options` | public |
-
-`/geocode` query param: `q` (min 2 chars) -> Nominatim OpenStreetMap.
-`/route` query params: `from_lat, from_lng, to_lat, to_lng` -> OSRM demo API.
-`/route/options` -> returns multiple travel mode options with cost/time/points estimates.
-
-### Users — prefix `/users`
-| Method | Path | Function | Auth |
-|---|---|---|---|
-| GET | `/users/me/preferences` | `get_preferences` | JWT |
-| PATCH | `/users/me/preferences` | `update_preferences` | JWT |
-
-### Segnalazioni — prefix `/segnalazioni`
-| Method | Path | Function | Auth |
-|---|---|---|---|
-| GET | `/segnalazioni` | `list_segnalazioni` | JWT (OPERATORE or owner) |
-| GET | `/segnalazioni/{segn_id}` | `get_segnalazione` | JWT |
-| PATCH | `/segnalazioni/{segn_id}/chiudi` | `chiudi_segnalazione` | JWT (OPERATORE) |
-
-### Area Restrizione — prefix `/aree-restrizione`
-| Method | Path | Function | Auth |
-|---|---|---|---|
-| GET | `/aree-restrizione` | `list_aree` | JWT |
-| GET | `/aree-restrizione/verifica` | `verifica_posizione` | public |
-| POST | `/aree-restrizione` | `crea_area` | JWT (AMMINISTRAZIONE) |
-| PATCH | `/aree-restrizione/{area_id}` | `aggiorna_area` | JWT (AMMINISTRAZIONE) |
-| DELETE | `/aree-restrizione/{area_id}` | `elimina_area` | JWT (AMMINISTRAZIONE) |
-
-### Operatore — prefix `/operatore` (role: OPERATORE required)
-| Method | Path | Function |
-|---|---|---|
-| GET | `/operatore/flotta` | `flotta` |
-| GET | `/operatore/mezzi-rilascio` | `mezzi_rilascio` |
-| GET | `/operatore/aree-densita` | `aree_densita` |
-| GET | `/operatore/utenti` | `lista_utenti` |
-| POST | `/operatore/utenti/{user_id}/stato` | `cambia_stato_utente` |
-| POST | `/operatore/mezzi/{vehicle_id}/blocco` | `blocco_remoto` |
-| POST | `/operatore/bonus` | `assegna_bonus` |
-
-### Amministrazione — prefix `/amministrazione` (role: AMMINISTRAZIONE required)
-| Method | Path | Function |
-|---|---|---|
-| GET | `/amministrazione/statistiche/utilizzo` | `utilizzo_per_tipo` |
-| GET | `/amministrazione/statistiche/tratte` | `tratte_piu_usate` |
-| GET | `/amministrazione/statistiche/zone-critiche` | `zone_critiche` |
-| GET | `/amministrazione/report` | `report_aggregato` |
-
-### Realtime — WebSocket
-| Path | Description |
-|---|---|
-| `/ws/mezzi/{vehicle_id}` | streams vehicle GPS position every second |
-| `/ws/notifiche` | streams notifications to authenticated user |
-
----
-
-## Frontend — API Client (`lib/api/endpoints.ts`)
-
-All methods return `Promise<T>` and throw `ApiError` on non-2xx responses.
-
-### `authApi`
-| Method | HTTP call |
-|---|---|
-| `register(body)` | POST `/auth/register` |
-| `login(body)` | POST `/auth/login` |
-| `me(token)` | GET `/auth/me` |
-| `updateMe(token, body)` | PATCH `/auth/me` |
-| `forgotPassword(email)` | POST `/auth/forgot-password` |
-
-Social login is handled inside `AuthContext.tsx` via `socialLogin(provider, idToken)` which calls POST `/auth/login` with `{ provider, token }`.
-
-### `vehiclesApi`
-| Method | HTTP call |
-|---|---|
-| `list(onlyAvailable?, lat?, lng?)` | GET `/vehicles` |
-| `get(id)` | GET `/vehicles/{id}` |
-
-### `parkingApi`
-| Method | HTTP call |
-|---|---|
-| `list(lat?, lng?)` | GET `/parking` |
-
-### `ridesApi`
-| Method | HTTP call |
-|---|---|
-| `history(token)` | GET `/rides` |
-| `active(token)` | GET `/rides/active` |
-| `start(token, body)` | POST `/rides` |
-| `end(token, rideId, body)` | POST `/rides/{rideId}/end` |
-| `pause(token, rideId)` | PATCH `/rides/{rideId}/pause` |
-
-### `usersApi`
-| Method | HTTP call |
-|---|---|
-| `getPreferences(token)` | GET `/users/me/preferences` |
-| `updatePreferences(token, body)` | PATCH `/users/me/preferences` |
-
-### `geoApi`
-| Method | HTTP call |
-|---|---|
-| `geocode(q)` | GET `/geocode?q=...` |
-| `route(from, to)` | GET `/route?from_lat=...` |
-| `routeOptions(from, to, vehicleType)` | GET `/route/options?...` |
-
-### `walletApi`
-| Method | HTTP call |
-|---|---|
-| `get(token)` | GET `/wallet` |
-| `topup(token, amount)` | POST `/wallet/topup` |
-
-### `paymentApi`
-| Method | HTTP call |
-|---|---|
-| `list(token)` | GET `/payment-methods` |
-| `add(token, body)` | POST `/payment-methods` |
-| `remove(token, id)` | DELETE `/payment-methods/{id}` |
-
-### `promotionsApi`
-| Method | HTTP call |
-|---|---|
-| `list()` | GET `/promotions` |
-
-### `messagesApi`
-| Method | HTTP call |
-|---|---|
-| `list(token)` | GET `/messages` |
-| `markAllRead(token)` | POST `/messages/read-all` |
-| `markRead(token, id)` | POST `/messages/{id}/read` |
-
-### `reportsApi`
-| Method | HTTP call |
-|---|---|
-| `list(token)` | GET `/reports` |
-| `create(token, body)` | POST `/reports` |
-
----
-
-## Frontend — TypeScript Interfaces (`lib/api/types.ts`)
-
-| Interface | Maps to backend model/schema |
-|---|---|
-| `ApiUser` | `User` / `UserOut` |
-| `TokenResponse` | `TokenOut` |
-| `ApiVehicle` | `Vehicle` / `VehicleOut` |
-| `ApiParkingArea` | `ParkingArea` / `ParkingAreaOut` |
-| `ApiRide` | `Ride` / `RideOut` |
-| `ApiTransaction` | `WalletTransaction` / `TransactionOut` |
-| `ApiWallet` | `WalletOut` |
-| `ApiPaymentMethod` | `PaymentMethod` / `PaymentMethodOut` |
-| `ApiPromotion` | `Promotion` / `PromotionOut` |
-| `ApiMessage` | `Message` / `MessageOut` |
-| `ApiReport` | report model / `ReportOut` |
-| `ApiPreferences` | `PreferencesOut` |
-| `ApiGeocodeResult` | `GeocodeResult` |
-| `ApiRoutePoint` | `RoutePoint` |
-| `ApiRouteOption` | `RouteOption` |
-
----
-
-## Frontend — Auth (`lib/auth/AuthContext.tsx`)
-
-State: `user: ApiUser | null`, `token: string | null`, `initializing: boolean`
-Token storage key: `"sm_token"` in expo-secure-store.
-
-Functions exported via `useAuth()`:
-| Function | Description |
-|---|---|
-| `login(email, password)` | email/password login, persists token |
-| `register(data)` | new account creation |
-| `logout()` | clears token and user state |
-| `refreshUser()` | re-fetches current user from `/auth/me` |
-| `socialLogin(provider, idToken)` | Google / Apple / Facebook OAuth |
-
----
-
-## Frontend — Lib Utilities
-
-### `lib/geo.ts`
-| Export | Description |
-|---|---|
-| `Coords` | interface `{ latitude: number; longitude: number }` |
-| `haversineMeters(a, b)` | distance in meters between two Coords |
-| `formatDistance(meters)` | human string: `"120 m"` or `"2,4 km"` |
-| `walkMinutes(meters)` | estimated walking minutes at 80 m/min |
-
-### `lib/vehicles.ts`
-| Export | Description |
-|---|---|
-| `MapVehicle` | interface `{ id, name, model, type, lat, lng, batteryPct }` |
-| `toMapVehicle(v)` | converts `ApiVehicle` (snake_case) to `MapVehicle` (camelCase) |
-| `vehicleIcon` | `Record<VehicleType, string>` — MaterialCommunityIcons icon name per type |
-| `vehicleTypeLabel` | `Record<VehicleType, string>` — Italian display label per type |
-| `MAP_VEHICLES` | static array (legacy fallback, not used in production screens) |
-
-### `lib/useDeviceLocation.ts`
-Returns `DeviceLocation` object:
-| Field / Method | Description |
-|---|---|
-| `coords` | current `Coords` or null |
-| `status` | `"idle"` / `"loading"` / `"granted"` / `"denied"` / `"error"` |
-| `error` | error string or null |
-| `source` | `"gps"` / `"manual"` / null |
-| `locate()` | requests permission and fetches GPS position (High accuracy) |
-| `setManualCoords(c)` | manually sets coordinates (SA-02a fallback) |
-| `geocodeAddress(address)` | geocodes a string address to `Coords` via expo-location |
-
-### `lib/format.ts`
-| Export | Description |
-|---|---|
-| `relativeTime(iso)` | e.g. `"2 ore fa"` |
-| `shortDateTime(iso)` | e.g. `"22 giu, 14:30"` |
-
----
-
-## Frontend — Screens
-
-### Auth group `(auth)/`
-| File | Route | Description |
-|---|---|---|
-| `login.tsx` | `/(auth)/login` | Email login + social buttons (Google, Apple, Facebook) |
-| `register.tsx` | `/(auth)/register` | New account form |
-| `forgot-password.tsx` | `/(auth)/forgot-password` | Email input -> calls `authApi.forgotPassword` -> shows sent confirmation |
-
-### App group `(app)/`
-| File | Route | Key API calls | Notes |
-|---|---|---|---|
-| `index.tsx` | `/(app)/` | `vehiclesApi.list` (polling every 8s + immediate re-fetch on GPS ready). `geoApi.geocode` on search query. | Renders `VehicleDetailSheet` + `ManualLocationModal`. Map center follows GPS. |
-| `search.tsx` | `/(app)/search` | `vehiclesApi.list`. `ridesApi.start` on "Inizia corsa". | Filter UI: type / battery / distance. Sort tabs: best / fastest / cheapest. |
-| `scan.tsx` | `/(app)/scan` | `ridesApi.start` | Parses vehicle ID from QR data string. Also supports manual code entry. |
-| `active-ride.tsx` | `/(app)/active-ride` | `ridesApi.active`, `geoApi.geocode`, `geoApi.route`, `ridesApi.pause`, `ridesApi.end` | Route drawn on MapView via OSRM. Timer counts up. Cost = (seconds/60) * 0.22. |
-| `end-ride.tsx` | `/(app)/end-ride` | none (receives params) | Params: `km, minutes, cost, points, vehicleType` |
-| `reserve.tsx` | `/(app)/reserve` | none | Confirmation screen before starting ride |
-| `ride-history.tsx` | `/(app)/ride-history` | `ridesApi.history` | |
-| `wallet.tsx` | `/(app)/wallet` | `walletApi.get` | Top-up flow included |
-| `payment.tsx` | `/(app)/payment` | `paymentApi.list`, `paymentApi.add`, `paymentApi.remove` | |
-| `promotions.tsx` | `/(app)/promotions` | `promotionsApi.list` | |
-| `messages.tsx` | `/(app)/messages` | `messagesApi.list`, `messagesApi.markAllRead`, `messagesApi.markRead` | |
-| `report.tsx` | `/(app)/report` | `reportsApi.create` | |
-| `profile.tsx` | `/(app)/profile` | user data from `AuthContext`. Ride stats from API. | Termini/Privacy open via `Linking.openURL`. |
-| `settings.tsx` | `/(app)/settings` | `usersApi.getPreferences` on mount. `usersApi.updatePreferences` on every toggle change. | Preferences: `notif_ride, notif_promo, notif_system, location_bg, biometric` |
-| `support.tsx` | `/(app)/support` | none | Live chat -> `router.push('/(app)/messages')`. Phone -> `Linking.openURL('tel:...')`. Email -> `Linking.openURL('mailto:...')`. |
-
----
-
-## Frontend — Components
-
-### `VehicleDetailSheet` (`components/map/VehicleDetailSheet.tsx`)
-Props: `vehicle: MapVehicle | null`, `userCoords: Coords | null`, `onClose: () => void`, `onReserve: (vehicle: MapVehicle) => void`
-
-Implementation: uses `Animated.Value` (no external library). Slides up from bottom when `vehicle` is non-null. States: peek (partially visible) and expanded (full). Displays: vehicle type, model, battery color-coded, distance from user, hardcoded pricing (unlock EUR 1.00 + EUR 0.22/min). CTA "Prenota ora" calls `onReserve`.
-
-### `ManualLocationModal` (`components/map/ManualLocationModal.tsx`)
-Props: `visible`, `reason`, `onConfirm(coords)`, `onRetryGps()`
-Shown when GPS is denied or unavailable (SA-02a fallback). Allows text address input -> geocoded to coords.
-
-### `VehicleCard` (`components/ui/VehicleCard.tsx`)
-Used in `search.tsx` vehicle list. Props: `vehicle: Vehicle`, `selected: boolean`, `onPress: (v: Vehicle) => void`
-
-### `GradientButton` (`components/ui/GradientButton.tsx`)
-Props: `title`, `onPress`, `loading?`, `full?`, `icon?`
-
-### `GlassCard` (`components/ui/GlassCard.tsx`)
-Decorative glass-effect container component.
-
----
-
-## Seed Data (`seed.py`)
-
-- **40 vehicles** randomly distributed within ~2.5km of Bari center (41.1177, 16.8718). Mix of scooter / ebike / bike in rotation. All `status="available"`, battery 30-100%, realistic pricing.
-- **1 demo user:** `claudio@smartmobility.it` / `password123`
-- **6 completed rides** with realistic addresses and metrics
-- **6 wallet transactions** (charges, topups, refund)
-- **1 payment method** (Visa, default)
-- **5 in-app messages**
-- **5 promotions**
-
----
-
-## Notable Implementation Details
-
-- **Vehicle GPS simulation:** every `GET /vehicles` call applies `+/- 0.0001 degrees` (~10m) drift to all available vehicles. If no vehicle is within `0.05 degrees` (~5km) of the user's `lat/lng`, up to 10 vehicles are repositioned randomly within `+/- 0.01 degrees` of the user.
-- **Ride status flow:** `active` -> (toggle pause) -> `paused` -> (toggle pause) -> `active` -> (end) -> `completed`. The `/rides/active` endpoint returns rides with status `active` OR `paused`.
-- **JWT session:** stored in expo-secure-store under key `"sm_token"`. Decoded on app start to restore session without requiring login.
-- **Social auth limitation:** Google and Apple sign-in do not work in Expo Go; they require an EAS development build. Documented in `lib/auth/useSocialAuth.ts`.
-- **Preferences persistence:** `User.preferences` is a JSON column in SQLite. `GET /users/me/preferences` merges stored values over hardcoded defaults. `PATCH /users/me/preferences` accepts partial updates.
-- **Role system:** three roles (`UTENTE`, `OPERATORE`, `AMMINISTRAZIONE`). Role-gated routers (`operatore.py`, `amministrazione.py`) use `require_role()` dependency. Regular user endpoints use `get_current_user` dependency from `deps.py`.
-- **Backend URL resolution (mobile):** `lib/api/client.ts` reads `Constants.expoConfig?.hostUri` from Expo to auto-detect the Metro bundler IP, so the app works on physical devices on the same Wi-Fi without hardcoding an IP address.
+</div>

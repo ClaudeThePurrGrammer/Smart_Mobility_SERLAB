@@ -1,6 +1,6 @@
 # 🛴 Smart Mobility — Gruppo C--
 
-> MVP per il corso di **Ingegneria del Software** — A.A. 2025/2026
+> 1MVP per il corso di **Ingegneria del Software** — A.A. 2025/2026
 > Università degli Studi di Bari Aldo Moro — CdL ITPS
 
 ## Indice

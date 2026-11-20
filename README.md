@@ -40,7 +40,7 @@ Il contesto è il **Comune di Zootropolis**, simulato sul territorio pugliese (B
 | Chiara Andriani | `chiara-andri` |
 | Claudio Andriani | `ClaudeThePurrGrammer` |
 | Vito Azzollini | `vito0522` |
-| Mattia Campi | — |
+| Mattia Campi | `mcampi2005-ai` |
 
 ---
 

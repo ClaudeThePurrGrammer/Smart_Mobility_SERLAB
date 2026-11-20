@@ -1,97 +1,98 @@
 # 🛴 Smart Mobility — Gruppo C--
 
-> Progetto d'esame per il corso di **Ingegneria del Software** — A.A. 2025/2026  
+> MVP per il corso di **Ingegneria del Software** — A.A. 2025/2026
 > Università degli Studi di Bari Aldo Moro — CdL ITPS
-
-**Team:**  
-Andriani Chiara · Andriani Claudio · Azzollini Vito · Campi Mattia
-
----
 
 ## Indice
 
-1. [Descrizione del Progetto](#1-descrizione-del-progetto)
-2. [Architettura del Sistema](#2-architettura-del-sistema)
-3. [Stack Tecnologico](#3-stack-tecnologico)
-4. [Confronto Documentazione ↔ Implementazione](#4-confronto-documentazione--implementazione)
-   - [Product Backlog — Item Funzionali](#41-product-backlog--item-funzionali)
-   - [Use Cases (CU-01 → CU-35)](#42-use-cases-cu-01--cu-35)
-5. [Struttura del Progetto](#5-struttura-del-progetto)
-6. [Installazione e Avvio](#6-installazione-e-avvio)
-7. [Reset del Database](#7-reset-del-database)
-8. [Credenziali di Default](#8-credenziali-di-default)
-9. [Repository GitHub](#9-repository-github)
+1. [Nome e descrizione](#1-nome-e-descrizione)
+2. [Gruppo](#2-gruppo)
+3. [Dati](#3-dati)
+4. [Funzionalità e ruoli](#4-funzionalità-e-ruoli)
+5. [Architettura](#5-architettura)
+6. [Come avviarla](#6-come-avviarla)
+7. [Sviluppo con i coding agent](#7-sviluppo-con-i-coding-agent)
+8. [Lavoro di gruppo](#8-lavoro-di-gruppo)
+9. [Limiti noti](#9-limiti-noti)
 
 ---
 
-## 1. Descrizione del Progetto
+## 1. Nome e descrizione
 
-Smart Mobility è una piattaforma di **sharing della mobilità urbana** che integra servizi di bike sharing, car sharing ed e-scooter sharing. Il sistema permette agli utenti di trovare, prenotare, sbloccare e pagare i mezzi tramite app mobile, mentre operatori e amministrazione pubblica monitorano e gestiscono la flotta e i dati di mobilità tramite dashboard web dedicata.
+**Smart Mobility** è una piattaforma di **sharing della mobilità urbana** che integra bike sharing, car sharing ed e-scooter sharing in un'unica applicazione.
 
-Il contesto di riferimento è il **Comune di Zootropolis** (simulato su Bari per il prototipo), con 22 aree di parcheggio e una flotta di 60 veicoli (bici, monopattini, auto).
+**Problema che risolve:** chi si sposta in città deve oggi usare app diverse per ogni tipo di mezzo, mentre chi gestisce il servizio e il Comune non hanno una vista unica su flotta, utilizzo e criticità. Smart Mobility mette nello stesso sistema:
 
----
+- **Utenti** — cittadini che trovano, prenotano, sbloccano (QR code) e pagano un mezzo dall'app mobile;
+- **Operatori del servizio** — gestiscono la flotta: tracciamento in tempo reale, malfunzionamenti, blocco remoto dei mezzi, blocco degli account, bonus;
+- **Amministrazione pubblica** — monitora l'uso dei mezzi, le tratte più utilizzate, configura le aree con restrizioni e consulta report aggregati.
 
-## 2. Architettura del Sistema
-
-Il sistema segue il pattern **MVC (Model-View-Controller)** su tre livelli distinti:
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│                          VIEW                                │
-│  ┌──────────────────┐  ┌───────────────────────────────────┐ │
-│  │  VistaUtente     │  │  VistaOperatore / VistaAmm.       │ │
-│  │  (React Native / │  │  (React + Vite, porta 5173)       │ │
-│  │   Expo SDK 54)   │  │  FormAutenticazione               │ │
-│  │                  │  │  ComponenteMappa                  │ │
-│  └────────┬─────────┘  └────────────┬──────────────────────┘ │
-└───────────┼────────────────────────┼───────────────────────--┘
-            │  REST API / WebSocket  │
-┌───────────┼────────────────────────┼────────────────────────┐
-│           ▼       CONTROLLER       ▼                        │
-│  FastAPI (Python 3.12) — porta 8000                         │
-│  GestioneMezzi · GestionePrenotazioni · GestioneCorsa       │
-│  GestionePagamenti · GestioneUtenti · GestioneSegnalazioni  │
-│  GestioneOperatore · GestioneAmministrazione                │
-│  GestioneRestrizioni · GestionePercorsi · GestioneRealtà    │
-└─────────────────────────┬───────────────────────────────────┘
-                          │  SQLAlchemy ORM
-┌─────────────────────────▼────────────────────────────────---┐
-│                        MODEL                                │
-│  PostgreSQL 15 — tabelle: Utente, Mezzo, Prenotazione,      │
-│  Pagamento, Percorso, Corsa, Segnalazione, Promozione,      │
-│  AreaRestrizione, Operatore, AmministrazionePubblica,       │
-│  Mezzo_AreaRestrizione                                      │
-└─────────────────────────────────────────────────────────────┘
-```
-
-**Interfacce esterne:** Maps API (Nominatim + OSRM), Payments Provider (simulato).
+Il contesto è il **Comune di Zootropolis**, simulato sul territorio pugliese (Bari e altre città) per il prototipo.
 
 ---
 
-## 3. Stack Tecnologico
+## 2. Gruppo
 
-| Livello | Tecnologia |
+**Gruppo C--**
+
+| Membro | Account GitHub |
 |---|---|
-| **Mobile (VIEW Utente)** | React Native 0.81 · Expo SDK 54 · TypeScript · Expo Router v6 (file-based routing) |
-| **Dashboard (VIEW Op./Amm.)** | React 19 · Vite 6 · TypeScript · Porta 5173 |
-| **Backend (CONTROLLER)** | Python 3.12 · FastAPI · SQLAlchemy 2 · Pydantic v2 · Uvicorn |
-| **Database (MODEL)** | PostgreSQL 15 |
-| **Real-time** | WebSocket (FastAPI WebSocket router) |
-| **Autenticazione** | JWT (python-jose) · SecureStore (mobile) |
-| **Mappe** | react-native-maps · Nominatim (geocoding) · OSRM (routing) |
-| **Container** | Docker + Docker Compose |
-| **Versioning** | SVN (Redmine) + GitHub |
+| Chiara Andriani | `chiara-andri` |
+| Claudio Andriani | `ClaudeThePurrGrammer` |
+| Vito Azzollini | `vito0522` |
+| Mattia Campi | — |
 
 ---
 
-## 4. Confronto Documentazione ↔ Implementazione
+## 3. Dati
 
-### 4.1 Product Backlog — Item Funzionali
+- **Dataset:** **dati interamente inventati** dal gruppo (dati sintetici). Non è stato usato nessun dataset esterno e non ci sono dati personali reali.
+- **Fonte / link:** il dataset è definito nel codice, in [`backend/app/seed.py`](backend/app/seed.py).
+- **Licenza:** dati creati dal gruppo, nessuna licenza di terze parti.
+- **Contenuto del seed:**
+  - **70 aree di parcheggio** in 12 città pugliesi (Bari, Foggia, Lecce, Taranto, Molfetta, Barletta, Andria, Brindisi, Altamura, Manfredonia, Trani, Cerignola). Nomi e capienze sono inventati; le coordinate sono approssimate su vie e piazze pubbliche;
+  - **60 veicoli** (monopattini, bici, auto elettriche) parcheggiati nelle aree di Bari, con batteria e tariffe inventate;
+  - **3 account demo** (utente, operatore, amministrazione) con nomi, email e telefoni inventati, e con storico corse, promozioni e messaggi fittizi.
+- **Come vengono importati:** non serve nessun import manuale. All'avvio del backend (`backend/app/main.py`) vengono eseguite in automatico le funzioni `seed()` ed `ensure_parking_areas()`, che popolano il database PostgreSQL se è vuoto. Per ripartire da zero vedi [Reset del database](#reset-del-database).
+- **Servizi esterni (non sono dataset):** la ricerca indirizzi usa **OpenStreetMap Nominatim** e il calcolo dei percorsi usa il **server demo OSRM**. Sono interrogati a runtime, senza chiave API (dati © OpenStreetMap contributors, licenza ODbL).
+
+---
+
+## 4. Funzionalità e ruoli
+
+### 4.1 Ruoli utente
+
+Il ruolo è salvato nel campo `role` del modello `User` (`UTENTE`, `OPERATORE`, `AMMINISTRAZIONE`) e viene letto dal token JWT al login, che mostra la sezione giusta dell'app.
+
+| Ruolo | Dove lavora | Cosa può fare |
+|---|---|---|
+| **Utente** | App mobile — `mobile/app/(app)/` | Mappa dei mezzi, prenotazione, sblocco con QR, corsa con pausa, fine corsa e pagamento, ricerca destinazione e stima costo, promozioni e punti fedeltà, wallet, segnalazioni, chat con l'assistenza |
+| **Operatore** | App mobile — `mobile/app/(operatore)/` · Dashboard web — `VistaOperatore` | Tracciamento in tempo reale (WebSocket), disponibilità delle aree, malfunzionamenti, mezzi a fine corsa, blocco remoto dei mezzi, blocco/sospensione degli account, chiusura segnalazioni, assegnazione bonus |
+| **Amministrazione pubblica** | App mobile — `mobile/app/(admin)/` · Dashboard web — `VistaAmministrazione` | Monitoraggio dell'uso dei mezzi, tratte più utilizzate, aree con restrizioni, segnalazione di zone/manutenzioni urbane, report aggregati sulla mobilità |
+
+### 4.2 Screenshot
+
+Le immagini seguenti sono i **mockup degli item di interfaccia** dell'app utente, presi dalla documentazione di progetto (`Documentazione Sorgente/`, §1.5.2 "Item di interfaccia"). Sono il riferimento grafico su cui è stata costruita l'app mobile, **non** catture dell'app in esecuzione. I file si trovano in [`docs/screenshots/`](docs/screenshots/).
+
+<table>
+<tr>
+<td align="center"><img src="docs/screenshots/01-login.jpg" alt="Login" width="180"><br><sub>Login</sub></td>
+<td align="center"><img src="docs/screenshots/02-home.jpg" alt="Home (mappa mezzi)" width="180"><br><sub>Home (mappa mezzi)</sub></td>
+<td align="center"><img src="docs/screenshots/03-menu.jpg" alt="Menù" width="180"><br><sub>Menù</sub></td>
+<td align="center"><img src="docs/screenshots/04-pagamento.jpg" alt="Pagamento" width="180"><br><sub>Pagamento</sub></td>
+</tr>
+<tr>
+<td align="center"><img src="docs/screenshots/05-ricerca.jpg" alt="Ricerca destinazione" width="180"><br><sub>Ricerca destinazione</sub></td>
+<td align="center"><img src="docs/screenshots/06-corsa-attiva.jpg" alt="Corsa attiva" width="180"><br><sub>Corsa attiva</sub></td>
+<td align="center"><img src="docs/screenshots/07-fine-corsa.jpg" alt="Fine corsa" width="180"><br><sub>Fine corsa</sub></td>
+</tr>
+</table>
+
+### 4.3 Product Backlog — Item Funzionali
 
 La documentazione (v6.0) specifica **35 Item Funzionali** distribuiti su tre ruoli. La tabella seguente mostra il grado di implementazione nel codice.
 
-#### Utenti (UT.01 – UT.18)
+##### Utenti (UT.01 – UT.18)
 
 | ID | Titolo | Stato | Componente implementato |
 |---|---|---|---|
@@ -114,7 +115,7 @@ La documentazione (v6.0) specifica **35 Item Funzionali** distribuiti su tre ruo
 | UT.17 | Segnalazione problematiche percorso | ✅ Implementato | `(app)/report.tsx` · `(app)/reports-history.tsx` · `segnalazioni.py` |
 | UT.18 | Pagamento corsa | ✅ Implementato | `(app)/ride-payment.tsx` · `(app)/payment-receipt.tsx` · `payment.py` |
 
-#### Amministrazione Pubblica (AP.01 – AP.07)
+##### Amministrazione Pubblica (AP.01 – AP.07)
 
 | ID | Titolo | Stato | Componente implementato |
 |---|---|---|---|
@@ -126,7 +127,7 @@ La documentazione (v6.0) specifica **35 Item Funzionali** distribuiti su tre ruo
 | AP.06 | Registrazione Amministrazione | ✅ Implementato | `(auth)/register.tsx` (role=AMMINISTRAZIONE) · `auth.py` |
 | AP.07 | Login Amministrazione | ✅ Implementato | `(auth)/login.tsx` · `auth.py` (ruolo rilevato da JWT) |
 
-#### Operatore del Servizio (OP.01 – OP.10)
+##### Operatore del Servizio (OP.01 – OP.10)
 
 | ID | Titolo | Stato | Componente implementato |
 |---|---|---|---|
@@ -145,7 +146,7 @@ La documentazione (v6.0) specifica **35 Item Funzionali** distribuiti su tre ruo
 
 ---
 
-### 4.2 Use Cases (CU-01 → CU-35)
+### 4.4 Use Cases (CU-01 → CU-35)
 
 La documentazione specifica 35 casi d'uso con sequenze principali, sequenze alternative e pre/post-condizioni. La tabella seguente mappa ogni CU ai moduli implementati.
 
@@ -189,7 +190,7 @@ La documentazione specifica 35 casi d'uso con sequenze principali, sequenze alte
 
 > **Copertura Use Cases: 35/35 (100%)**
 
-#### Note sull'implementazione
+##### Note sull'implementazione
 
 - **Spawn-near-user logic (CU-02):** se l'utente ha meno di 12 veicoli entro ~1,2 km, il sistema sposta automaticamente veicoli parcheggiati nelle 8 aree di parcheggio più vicine all'utente.
 - **Auto-logout su blocco account (CU-35):** il backend risponde HTTP 403 quando un utente bloccato/sospeso fa qualsiasi richiesta autenticata. Il client mobile intercetta globalmente il 403 ed esegue il logout immediato.
@@ -199,7 +200,65 @@ La documentazione specifica 35 casi d'uso con sequenze principali, sequenze alte
 
 ---
 
-## 5. Struttura del Progetto
+## 5. Architettura
+
+Il sistema segue il pattern **MVC (Model-View-Controller)** su tre livelli distinti:
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                          VIEW                                │
+│  ┌──────────────────┐  ┌───────────────────────────────────┐ │
+│  │  VistaUtente     │  │  VistaOperatore / VistaAmm.       │ │
+│  │  (React Native / │  │  (React + Vite, porta 5173)       │ │
+│  │   Expo SDK 54)   │  │  FormAutenticazione               │ │
+│  │                  │  │  ComponenteMappa                  │ │
+│  └────────┬─────────┘  └────────────┬──────────────────────┘ │
+└───────────┼────────────────────────┼───────────────────────--┘
+            │  REST API / WebSocket  │
+┌───────────┼────────────────────────┼────────────────────────┐
+│           ▼       CONTROLLER       ▼                        │
+│  FastAPI (Python 3.12) — porta 8000                         │
+│  GestioneMezzi · GestionePrenotazioni · GestioneCorsa       │
+│  GestionePagamenti · GestioneUtenti · GestioneSegnalazioni  │
+│  GestioneOperatore · GestioneAmministrazione                │
+│  GestioneRestrizioni · GestionePercorsi · GestioneRealtà    │
+└─────────────────────────┬───────────────────────────────────┘
+                          │  SQLAlchemy ORM
+┌─────────────────────────▼────────────────────────────────---┐
+│                        MODEL                                │
+│  PostgreSQL 16 — tabelle: Utente, Mezzo, Prenotazione,      │
+│  Pagamento, Percorso, Corsa, Segnalazione, Promozione,      │
+│  AreaRestrizione, Operatore, AmministrazionePubblica,       │
+│  Mezzo_AreaRestrizione                                      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Interfacce esterne:** Maps API (Nominatim + OSRM), Payments Provider (simulato).
+
+### 5.1 Stack tecnologico
+
+| Livello | Tecnologia |
+|---|---|
+| **Mobile (VIEW Utente)** | React Native 0.81 · Expo SDK 54 · TypeScript · Expo Router v6 (file-based routing) |
+| **Dashboard (VIEW Op./Amm.)** | React 19 · Vite 6 · TypeScript · Porta 5173 |
+| **Backend (CONTROLLER)** | Python 3.12 · FastAPI · SQLAlchemy 2 · Pydantic v2 · Uvicorn |
+| **Database (MODEL)** | PostgreSQL 16 |
+| **Real-time** | WebSocket (FastAPI WebSocket router) |
+| **Autenticazione** | JWT (python-jose) · SecureStore (mobile) |
+| **Mappe** | react-native-maps · Nominatim (geocoding) · OSRM (routing) |
+| **Container** | Docker + Docker Compose |
+| **Versioning** | SVN su Redmine (fase di progettazione e prima consegna) · Git/GitHub (MVP) |
+
+### 5.2 API esterne
+
+| Servizio | Uso | Chiave |
+|---|---|---|
+| OpenStreetMap Nominatim | Ricerca indirizzi / geocoding (`routers/geo.py`, `routers/amministrazione.py`) | Non serve |
+| OSRM (server demo) | Calcolo del percorso (`routers/geo.py`) | Non serve |
+| Google / Facebook OAuth | Login social (**opzionale**) | Solo se si vuole attivarlo, vedi variabili d'ambiente |
+| Provider di pagamento | **Simulato**: nessun pagamento reale | — |
+
+### 5.3 Struttura delle cartelle
 
 ```
 Smart_Mobility_SERLAB/
@@ -211,7 +270,7 @@ Smart_Mobility_SERLAB/
 │   │   ├── database.py          # Engine, SessionLocal, wait_for_db
 │   │   ├── deps.py              # get_current_user, require_role
 │   │   ├── security.py          # JWT encode/decode, password hashing
-│   │   ├── seed.py              # Seed: 60 veicoli, 22 aree di Bari, utenti demo
+│   │   ├── seed.py              # Seed: 60 veicoli, 70 aree in 12 città, utenti demo
 │   │   └── routers/
 │   │       ├── auth.py          # Registrazione, login, JWT
 │   │       ├── users.py         # Profilo utente, impostazioni
@@ -249,40 +308,55 @@ Smart_Mobility_SERLAB/
 └── docker-compose.yml
 ```
 
+Altri file in root: `docker-compose.yml` (servizi `db`, `backend`, `dashboard`, `mobile`), `genera_qr_mezzi.py` (genera i QR code dei mezzi, vedi `Documentazione Sorgente/qr_mezzi.pdf`), `.github/workflows/ios-build.yml` (build iOS manuale su GitHub Actions), `Documentazione Sorgente/` (documentazione di progetto in PDF).
+
 ---
 
-## 6. Installazione e Avvio
+## 6. Come avviarla
 
-### Prerequisiti
+### Requisiti
 
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (con Docker Compose v2)
-- [Node.js 20+](https://nodejs.org/) e npm
-- [Expo Go](https://expo.dev/go) sul dispositivo mobile (iOS o Android)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) con Docker Compose v2
+- [Node.js 20+](https://nodejs.org/) e npm (per l'app mobile)
+- [Expo Go](https://expo.dev/go) su uno smartphone iOS o Android, **sulla stessa rete Wi-Fi del PC**
 
-### Passo 1 — Clona il repository
+### Installazione
+
+#### Passo 1 — Clona il repository
 
 ```bash
 git clone https://github.com/ClaudeThePurrGrammer/Smart_Mobility_SERLAB.git
 cd Smart_Mobility_SERLAB
 ```
 
-### Passo 2 — Configura le variabili d'ambiente
+### Variabili d'ambiente
 
-Crea un file `.env` nella root del progetto:
+I file `.env` **non sono nel repository** (sono esclusi dal `.gitignore`). Si creano copiando gli esempi:
 
-```env
-# Indirizzo IP della macchina host (necessario per Expo Go su LAN)
-HOST_IP=<il-tuo-ip-locale>   # es. 192.168.1.10
-
-# Segreto JWT (cambia in produzione)
-JWT_SECRET=changeme
+```bash
+cp .env.example .env
+cp mobile/.env.example mobile/.env    # opzionale
 ```
 
-Per trovare il tuo IP locale:
-- **Windows:** `ipconfig` → IPv4 Address
-- **macOS/Linux:** `ifconfig` oppure `ip a`
+**`.env` (root)** — usato da `docker-compose.yml`
 
-### Passo 3 — Avvia il Backend (API + Database)
+| Variabile | Obbligatoria | Descrizione |
+|---|---|---|
+| `HOST_IP` | Sì (per Expo Go) | IP locale del PC, es. `192.168.1.10` (`ipconfig` su Windows, `ifconfig` / `ip a` su macOS/Linux) |
+| `JWT_SECRET` | Sì | Segreto per firmare i token JWT: scegliete una stringa qualsiasi |
+| `GOOGLE_CLIENT_ID` | No | Solo per attivare il login Google reale |
+| `FACEBOOK_APP_ID`, `FACEBOOK_APP_SECRET` | No | Solo per attivare il login Facebook reale |
+
+**`mobile/.env`** — opzionale
+
+| Variabile | Descrizione |
+|---|---|
+| `EXPO_PUBLIC_API_URL` | Da impostare solo se il backend non gira sul PC locale (di default l'app lo trova da sola sulla porta 8000) |
+| `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID`, `EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID`, `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`, `EXPO_PUBLIC_FACEBOOK_APP_ID` | Solo per il login social |
+
+### Avvio
+
+#### Passo 2 — Avvia il Backend (API + Database)
 
 ```bash
 docker compose up --build backend db -d
@@ -290,9 +364,9 @@ docker compose up --build backend db -d
 
 Il backend sarà disponibile su `http://localhost:8000`. La documentazione API interattiva è su `http://localhost:8000/docs`.
 
-> Al primo avvio il database viene popolato automaticamente con 60 veicoli, 22 aree di parcheggio di Bari, e gli account demo.
+> Al primo avvio il database viene popolato automaticamente con 60 veicoli, 70 aree di parcheggio (vedi [Dati](#3-dati)), e gli account demo.
 
-### Passo 4 — Avvia la Dashboard Web (Operatore / Amministrazione)
+#### Passo 3 — Avvia la Dashboard Web (Operatore / Amministrazione)
 
 ```bash
 docker compose up --build dashboard -d
@@ -300,7 +374,7 @@ docker compose up --build dashboard -d
 
 La dashboard è disponibile su `http://localhost:5173`.
 
-### Passo 5 — Avvia l'App Mobile
+#### Passo 4 — Avvia l'App Mobile
 
 L'app mobile viene avviata **fuori da Docker** per compatibilità con Expo Go:
 
@@ -314,7 +388,7 @@ Scansiona il QR code con **Expo Go** (Android) o con la fotocamera (iOS).
 
 > Assicurati che il dispositivo mobile e il PC siano sulla **stessa rete Wi-Fi**.
 
-### Riepilogo servizi
+#### Riepilogo servizi
 
 | Servizio | URL | Note |
 |---|---|---|
@@ -323,47 +397,92 @@ Scansiona il QR code con **Expo Go** (Android) o con la fotocamera (iOS).
 | Dashboard | `http://localhost:5173` | Login con account operatore/amm. |
 | App Mobile | QR code nel terminale | Expo Go |
 
----
+### Reset del database
 
-## 7. Reset del Database
-
-Per ripartire da zero (cancella tutti i dati e ri-esegue il seed):
+Per cancellare tutti i dati e rieseguire il seed:
 
 ```bash
 docker compose down -v
 docker compose up --build backend db -d
 ```
 
----
+### Utenti di prova (inventati)
 
-## 8. Credenziali di Default
-
-Dopo il seed iniziale sono disponibili i seguenti account demo:
+Vengono creati in automatico dal seed (`backend/app/seed.py`):
 
 | Ruolo | Email | Password |
 |---|---|---|
-| Utente | `demo@smartmobility.it` | `password123` |
-| Operatore | `operatore@smartmobility.it` | `operatore123` |
-| Amministrazione | `admin@smartmobility.it` | `admin123` |
+| Utente | `utente@smartmobility.it` | `password123` |
+| Operatore | `operatore@smartmobility.it` | `password123` |
+| Amministrazione | `amministrazione@smartmobility.it` | `password123` |
 
-> ⚠️ Queste credenziali sono solo per ambienti di sviluppo e test.
+> ⚠️ Sono account fittizi, validi solo in sviluppo.
+
+### Test
+
+Al momento **non ci sono test automatici** nel repository (vedi [Limiti noti](#9-limiti-noti)). Gli endpoint si possono provare a mano dalla Swagger UI su `http://localhost:8000/docs`, usando gli utenti di prova qui sopra.
 
 ---
 
-## 9. Repository GitHub
+## 7. Sviluppo con i coding agent
 
-Il codice sorgente completo è disponibile su:
+- **Agent usati:** **Claude Desktop** e **Claude Code** (Anthropic).
+- **Modelli:** **Claude Opus** e **Claude Sonnet**, in genere con effort di ragionamento **High / Max**.
+- **Approccio:** modalità **automatica**: l'agent applica le modifiche ai file in autonomia e, in alcuni casi, chiede conferma prima di eseguire comandi da terminale.
+- **Prompt di lavoro:** il file [`PROMPT_CLAUDECODE.md`](PROMPT_CLAUDECODE.md) contiene il prompt dato a Claude Code dopo una revisione del codice (stato al 22-06-2026). Elenca 6 fix puntuali con file, problema e soluzione attesa (compatibilità schema, seed dei veicoli, recupero password, link Termini/Privacy, pannello dettaglio mezzo, spawn dei veicoli vicino all'utente), una tabella di priorità e la lista delle parti da **non** modificare.
+- **AGENTS.md / CLAUDE.md:** non presenti nel repository; il contesto all'agent è stato dato tramite `PROMPT_CLAUDECODE.md`.
+- **Skill:** nessuna skill personalizzata (nel repository non ci sono cartelle `.claude/` né file `SKILL.md`).
+- **Riservatezza:** `.claude/settings.local.json` e i file `.env` sono esclusi dal `.gitignore`.
 
-**🔗 https://github.com/ClaudeThePurrGrammer/Smart_Mobility_SERLAB**
+---
 
-Se questo progetto ti è stato utile o hai trovato interessante il lavoro svolto,  
-considera di **lasciare una ⭐ Star** sulla repository — è un piccolo gesto che significa molto per il team! 😊
+## 8. Lavoro di gruppo
+
+Il progetto è stato gestito con **Scrum su Redmine** (3 sprint, dal 6 maggio al 28 giugno 2026; 205 attività, tutte chiuse). La progettazione è stata divisa **per user story**: ogni membro ha preso un gruppo di user story e, per ciascuna, ha curato specifica del caso d'uso, diagramma di sequenza e revisioni. Il codice della prima fase è stato versionato su **SVN** (TortoiseSVN, collegato a Redmine) e poi importato su GitHub.
+
+| Membro | Attività su Redmine (assegnate) | Responsabilità principali |
+|---|---|---|
+| **Chiara Andriani** | 46 | User Stories aggiornate, glossario e item non funzionali; casi d'uso UC-16 → UC-23 e UC-26 (US 16, 17, AP.01 → AP.06, OP-02); diagramma dei casi d'uso (versione definitiva in Visual Paradigm); struttura fisica del database. Codice: parte amministrazione e operatore (branch `operator-admin`) |
+| **Claudio Andriani** | 40 | Diagramma delle componenti (iniziale e definitivo); casi d'uso UC-11 → UC-15 e UC-32 → UC-34 (US 09, 10, 11, 13, 14, OP-08 → OP-10); Sprint Backlog e refinement dello sprint 1; pubblicazione della prima versione del frontend (7/06) e consegna definitiva del codice su SVN (28/06); import su GitHub e integrazione dei branch |
+| **Vito Azzollini** | 44 | Product Backlog iniziale e refinement dello sprint 2; UI del sistema; casi d'uso UC-01 → UC-05, UC-25, UC-27, UC-28 (US 15, 01, 02, 12, 05, OP-01, OP-03, OP-04); diagramma delle classi (View / Controller / Model, sprint 1 e 2); modello logico del DB; report degli sprint 2 e 3. Codice: aggiornamento del 26/06 |
+| **Mattia Campi** | 46 | Refinement del Product Backlog per lo sprint 0; casi d'uso UC-06 → UC-10, UC-24, UC-29 → UC-31 (US 03, 04, 06, 07, 08, AP-07, OP-05 → OP-07); revisione dei diagrammi di sequenza; diagramma delle classi definitivo; report dello sprint 1 |
+
+Fonte: export CSV delle attività Redmine e storico Git.
+
+### Branch e pull request
+
+| Branch | Contenuto |
+|---|---|
+| `main` | Versione integrata dell'MVP |
+| `user-side` | Branch per il lato utente: non contiene commit che non siano già in `main` |
+| `operator-admin` | Lato operatore e amministrazione (commit di Chiara Andriani) |
+
+Il branch `operator-admin` è stato integrato in `main` **a mano** (commit `cc9fdd4`, "merge: integrazione operator/admin da branch colleghi"), non con una pull request, perché la prima fase del lavoro era su SVN. Dall'MVP in poi le modifiche passano da pull request:
+
+| Branch | Descrizione della pull request |
+|---|---|
+| `docs/readme-mvp` → `main` | README dell'MVP secondo la traccia di consegna, dati demo resi fittizi nel seed, mockup dell'interfaccia in `docs/screenshots/` |
+
+---
+
+## 9. Limiti noti
+
+- **Nessun test automatico** (né `pytest` per il backend né test per mobile/dashboard).
+- **Pagamenti simulati:** wallet e pagamento corsa non sono collegati a un provider reale.
+- **Recupero password dimostrativo:** `POST /auth/forgot-password` risponde sempre OK ma non invia email.
+- **Login social** (Google/Facebook) funziona davvero solo se si configurano le credenziali OAuth nei `.env`.
+- **Dipendenza da servizi pubblici gratuiti:** Nominatim e il server demo OSRM hanno limiti di utilizzo; se non rispondono, ricerca e percorsi non funzionano.
+- **App mobile solo in sviluppo con Expo Go:** telefono e PC devono stare sulla stessa rete Wi-Fi; non esiste una build pubblicata sugli store.
+- **Credenziali del database di sviluppo** scritte in chiaro in `docker-compose.yml` (`POSTGRES_PASSWORD`): vanno bene solo in locale.
+- **Link "Termini di servizio"** dell'app puntano a un URL di esempio, non a una pagina reale.
+- **Screenshot:** nel README ci sono i mockup di progetto, non catture dell'app in esecuzione.
+- **Dati solo sintetici:** posizioni dei mezzi e storico corse non vengono da una flotta reale.
 
 ---
 
 <div align="center">
 
-*Progetto realizzato per il corso di Ingegneria del Software — A.A. 2025/2026*  
+*Progetto realizzato per il corso di Ingegneria del Software — A.A. 2025/2026*
 *Università degli Studi di Bari Aldo Moro*
 
 **Andriani Chiara · Andriani Claudio · Azzollini Vito · Campi Mattia**

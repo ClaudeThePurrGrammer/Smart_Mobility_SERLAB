@@ -2,7 +2,7 @@
 
 Mantiene veicoli, parcheggi, promozioni e aree di restrizione.
 Cancella tutti gli utenti, corse, transazioni, messaggi.
-Poi ricrea l'utente demo: claudio@smartmobility.it / password123
+Poi ricrea l'utente demo: utente@smartmobility.it / password123
 
 Uso (con Docker):
   docker exec smart_mobility_api python reset_db.py

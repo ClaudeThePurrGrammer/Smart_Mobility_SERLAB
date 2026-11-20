@@ -105,7 +105,7 @@ export default function FormAutenticazione() {
 
         {mode === 'login' && (
           <p className="muted" style={{ fontSize: 12, textAlign: 'center', marginTop: 6 }}>
-            Demo: operatore@smartmobility.it · comune@bari.it — password123
+            Demo: operatore@smartmobility.it · amministrazione@smartmobility.it — password123
           </p>
         )}
       </form>

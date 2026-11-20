@@ -1,6 +1,6 @@
 # 🛴 Smart Mobility — Gruppo C--
 
-> 1MVP per il corso di **Ingegneria del Software** — A.A. 2025/2026
+> MVP per il corso di **Ingegneria del Software** — A.A. 2025/2026
 > Università degli Studi di Bari Aldo Moro — CdL ITPS
 
 ## Indice
@@ -40,7 +40,7 @@ Il contesto è il **Comune di Zootropolis**, simulato sul territorio pugliese (B
 | Chiara Andriani | `chiara-andri` |
 | Claudio Andriani | `ClaudeThePurrGrammer` |
 | Vito Azzollini | `vito0522` |
-| Mattia Campi | — |
+| Mattia Campi | `mcampi2005-ai` |
 
 ---
 

@@ -90,7 +90,7 @@ Mostra sempre "Email inviata" dopo 1,2 secondi indipendentemente dall'input.
 Rimuovere il loading/setTimeout e mostrare subito un testo fisso:
 ```
 "Per reimpostare la password contatta il supporto a supporto@smartmobility.it
-o usa le credenziali demo: claudio@smartmobility.it / password123"
+o usa le credenziali demo: utente@smartmobility.it / password123"
 ```
 
 **Opzione B — endpoint backend minimo (più completo):**

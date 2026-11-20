@@ -522,28 +522,28 @@ def seed(db: Session) -> None:
         db.flush()
         db.add(OperatoreProfile(user_id=op.id, zona_competenza="Bari Centro", matricola="OP-001"))
 
-    if not db.query(User).filter(User.email == "comune@bari.it").first():
+    if not db.query(User).filter(User.email == "amministrazione@smartmobility.it").first():
         admin = User(
-            name="Lucia", surname="Bianchi", email="comune@bari.it",
+            name="Lucia", surname="Bianchi", email="amministrazione@smartmobility.it",
             phone="+39 080 555 6677", password_hash=hash_password("password123"),
             provider="email", role="AMMINISTRAZIONE", created_at=_ago(days=120),
         )
         db.add(admin)
         db.flush()
         db.add(AmministrazioneProfile(
-            user_id=admin.id, ente_appartenenza="Comune di Bari", codice_ente="BA-COM-01",
+            user_id=admin.id, ente_appartenenza="Comune di Zootropolis", codice_ente="ZT-COM-01",
         ))
 
     db.commit()
 
-    # ── Utente demo con dati reali ──────────────────────────────────────────
-    if db.query(User).filter(User.email == "claudio@smartmobility.it").first():
+    # ── Utente demo (dati fittizi) ──────────────────────────────────────────
+    if db.query(User).filter(User.email == "utente@smartmobility.it").first():
         return
 
     user = User(
-        name="Claudio", surname="Andriani",
-        email="claudio@smartmobility.it",
-        phone="+39 333 123 4567",
+        name="Mario", surname="Rossi",
+        email="utente@smartmobility.it",
+        phone="+39 000 123 4567",
         password_hash=hash_password("password123"),
         provider="email",
         points=430, balance=8.90,
@@ -604,4 +604,4 @@ def seed(db: Session) -> None:
         ))
 
     db.commit()
-    print("[seed] Dati iniziali inseriti. Utente demo: claudio@smartmobility.it / password123")
+    print("[seed] Dati iniziali inseriti. Utente demo: utente@smartmobility.it / password123")
